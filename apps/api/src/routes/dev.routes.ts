@@ -1,11 +1,17 @@
 import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
+import type { Env } from "../config/env.js";
+import { devRoutesEnabled } from "../config/runtime.js";
 import * as schema from "../db/schema/index.js";
 
 /** Development-only helpers for obtaining JWT and seeding demo tenant. */
-export async function registerDevRoutes(app: FastifyInstance) {
+export async function registerDevRoutes(app: FastifyInstance, env: Env) {
+  if (!devRoutesEnabled(env)) {
+    return;
+  }
+
   app.post("/api/v1/dev/bootstrap", async (_request, reply) => {
-    if (process.env.NODE_ENV === "production") {
+    if (!devRoutesEnabled(env)) {
       return reply.status(404).send({ error: "Not found" });
     }
 
@@ -53,7 +59,7 @@ export async function registerDevRoutes(app: FastifyInstance) {
   });
 
   app.post("/api/v1/dev/token", async (request, reply) => {
-    if (process.env.NODE_ENV === "production") {
+    if (!devRoutesEnabled(env)) {
       return reply.status(404).send({ error: "Not found" });
     }
     const body = request.body as { userId?: string };

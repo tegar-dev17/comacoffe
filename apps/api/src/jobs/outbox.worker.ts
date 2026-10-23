@@ -1,29 +1,16 @@
-import { isNull, eq } from "drizzle-orm";
 import type { AppDatabase } from "../db/client.js";
-import * as schema from "../db/schema/index.js";
+import type { Env } from "../config/env.js";
+import { processOutboxBatch } from "../modules/payment/services/outbox.service.js";
 
-export async function processOutboxBatch(db: AppDatabase, limit = 20) {
-  const events = await db
-    .select()
-    .from(schema.transactionalOutbox)
-    .where(isNull(schema.transactionalOutbox.processedAt))
-    .limit(limit);
-
-  for (const event of events) {
-    // POS notification hook — extend with WebSocket/SSE/push integration.
-    await db
-      .update(schema.transactionalOutbox)
-      .set({ processedAt: new Date() })
-      .where(eq(schema.transactionalOutbox.id, event.id));
+export function startOutboxWorker(db: AppDatabase, env: Env, intervalMs?: number) {
+  if (env.NODE_ENV === "test") {
+    return () => undefined;
   }
-  return events.length;
-}
-
-export function startOutboxWorker(db: AppDatabase, intervalMs = 5000) {
+  const every = intervalMs ?? env.OUTBOX_INTERVAL_MS;
   const timer = setInterval(() => {
-    void processOutboxBatch(db).catch((err) => {
+    void processOutboxBatch(db, env).catch((err) => {
       console.error("outbox worker error", err);
     });
-  }, intervalMs);
+  }, every);
   return () => clearInterval(timer);
 }

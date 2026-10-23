@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { Env } from "../../../config/env.js";
 import type { PaymentStatus } from "../types.js";
 import type { PaymentProviderAdapter } from "./interface.js";
+import type { ProviderRuntimeConfig } from "./runtime-config.js";
 
 interface MidtransChargeResponse {
   status_code: string;
@@ -32,7 +33,10 @@ interface MidtransNotification {
 export class MidtransAdapter implements PaymentProviderAdapter {
   readonly name = "midtrans" as const;
 
-  constructor(private readonly env: Env) {}
+  constructor(
+    private readonly env: Env,
+    private readonly runtime?: ProviderRuntimeConfig,
+  ) {}
 
   capabilities() {
     return {
@@ -44,16 +48,21 @@ export class MidtransAdapter implements PaymentProviderAdapter {
     };
   }
 
-  private authHeader(): string {
-    const key = this.env.MIDTRANS_SERVER_KEY;
+  private serverKey(): string {
+    const key = this.runtime?.credentials.serverKey ?? this.env.MIDTRANS_SERVER_KEY;
     if (!key) {
-      throw new Error("MIDTRANS_SERVER_KEY is not configured");
+      throw new Error("Midtrans server key is not configured");
     }
-    return `Basic ${Buffer.from(`${key}:`).toString("base64")}`;
+    return key;
+  }
+
+  private authHeader(): string {
+    return `Basic ${Buffer.from(`${this.serverKey()}:`).toString("base64")}`;
   }
 
   private baseUrl(): string {
-    return this.env.MIDTRANS_API_BASE_URL.replace(/\/$/, "");
+    const base = this.runtime?.credentials.apiBaseUrl ?? this.env.MIDTRANS_API_BASE_URL;
+    return base.replace(/\/$/, "");
   }
 
   normalizeProviderStatus(providerStatus: string): PaymentStatus {
@@ -224,8 +233,12 @@ export class MidtransAdapter implements PaymentProviderAdapter {
 
   verifyWebhook(_headers: Record<string, string | string[] | undefined>, body: unknown): boolean {
     const notification = body as MidtransNotification;
-    const serverKey = this.env.MIDTRANS_SERVER_KEY;
-    if (!serverKey) return false;
+    let serverKey: string;
+    try {
+      serverKey = this.serverKey();
+    } catch {
+      return false;
+    }
     if (!notification.signature_key) return false;
     const expected = createHash("sha512")
       .update(

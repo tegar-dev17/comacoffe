@@ -18,6 +18,16 @@ const envSchema = z.object({
   PAYMENT_REFRESH_RATE_LIMIT_PER_MINUTE: z.coerce.number().default(10),
   RECONCILIATION_BATCH_SIZE: z.coerce.number().default(50),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),
+  ENABLE_DEV_ROUTES: z.preprocess(
+    (val) => val === "true" || val === true,
+    z.boolean().default(false),
+  ),
+  REFUND_APPROVAL_THRESHOLD_MINOR: z.coerce.number().int().positive().default(500_000),
+  RECONCILIATION_INTERVAL_MS: z.coerce.number().int().positive().default(60_000),
+  RECONCILIATION_STALE_MINUTES: z.coerce.number().int().positive().default(15),
+  OUTBOX_INTERVAL_MS: z.coerce.number().int().positive().default(5_000),
+  OUTBOX_MAX_ATTEMPTS: z.coerce.number().int().positive().default(8),
+  ENABLE_RLS: z.preprocess((val) => val === "true" || val === true, z.boolean().default(false)),
 });
 
 export type Env = z.infer<typeof envSchema>;
@@ -32,6 +42,10 @@ export function loadEnv(overrides?: Record<string, string>): Env {
   }
   if (!overrides) cached = parsed.data;
   return parsed.data;
+}
+
+export function resetEnvCacheForTests(): void {
+  cached = null;
 }
 
 export function validatePaymentProviderConfig(env: Env): void {

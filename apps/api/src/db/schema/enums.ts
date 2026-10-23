@@ -27,9 +27,19 @@ export const orderStatusEnum = pgEnum("order_status", [
 
 export const refundStatusEnum = pgEnum("refund_status", [
   "PENDING",
+  "PENDING_APPROVAL",
+  "PENDING_PROVIDER",
   "SUCCEEDED",
   "FAILED",
   "CANCELLED",
+  "REJECTED",
+]);
+
+export const refundApprovalStatusEnum = pgEnum("refund_approval_status", [
+  "NOT_REQUIRED",
+  "PENDING",
+  "APPROVED",
+  "REJECTED",
 ]);
 
 export const webhookProcessingStatusEnum = pgEnum("webhook_processing_status", [
@@ -54,4 +64,12 @@ export const settlementStatusEnum = pgEnum("settlement_status", [
   "PENDING",
   "SETTLED",
   "FAILED",
+]);
+
+export const providerEnvironmentEnum = pgEnum("provider_environment", ["sandbox", "production"]);
+
+export const merchantConfigStatusEnum = pgEnum("merchant_config_status", [
+  "active",
+  "inactive",
+  "pending_verification",
 ]);

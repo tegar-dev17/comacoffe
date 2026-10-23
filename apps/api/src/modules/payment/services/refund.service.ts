@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { v4 as uuidv4 } from "uuid";
 import type { Env } from "../../../config/env.js";
@@ -6,6 +6,7 @@ import * as schema from "../../../db/schema/index.js";
 import type { AuthContext } from "../../auth/types.js";
 import { PERMISSIONS, roleHasPermission } from "../../auth/permissions.js";
 import { createProviderAdapter } from "../providers/factory.js";
+import { MerchantConfigService } from "./merchant-config.service.js";
 import { ProviderCapabilityError } from "../providers/midtrans.adapter.js";
 import { isPaidStatus, resolveTransition } from "../state-machine.js";
 import { stableHash } from "../utils/hash.js";
@@ -18,8 +19,6 @@ import {
 } from "./payment.service.js";
 
 type Db = NodePgDatabase<typeof schema>;
-
-const REFUND_APPROVAL_THRESHOLD_MINOR = 500_000;
 
 export class RefundService {
   private paymentService: PaymentService;
@@ -60,12 +59,110 @@ export class RefundService {
       throw new PaymentValidationError("Payment is not refundable");
     }
 
-    if (
-      input.amountMinor > REFUND_APPROVAL_THRESHOLD_MINOR &&
-      !["owner", "admin", "supervisor"].includes(auth.role)
-    ) {
-      throw new PaymentForbiddenError("Refund amount requires supervisor approval");
+    const threshold = this.env.REFUND_APPROVAL_THRESHOLD_MINOR;
+    const requiresApproval =
+      input.amountMinor > threshold || auth.role === "cashier";
+
+    const refundSumRows = await this.db
+      .select({
+        refunded: sql<number>`coalesce(sum(${schema.paymentRefunds.amountMinor}), 0)::int`,
+      })
+      .from(schema.paymentRefunds)
+      .where(
+        and(
+          eq(schema.paymentRefunds.paymentId, paymentId),
+          inArray(schema.paymentRefunds.status, [
+            "SUCCEEDED",
+            "PENDING",
+            "PENDING_PROVIDER",
+            "PENDING_APPROVAL",
+          ]),
+        ),
+      );
+
+    const reserved = refundSumRows[0]?.refunded ?? 0;
+    const refundableRemaining = payment.amountMinor - reserved;
+    if (input.amountMinor <= 0 || input.amountMinor > refundableRemaining) {
+      throw new PaymentValidationError("Invalid refund amount");
     }
+
+    const refundId = uuidv4();
+    const approvalStatus = requiresApproval ? ("PENDING" as const) : ("NOT_REQUIRED" as const);
+    const initialStatus = requiresApproval ? ("PENDING_APPROVAL" as const) : ("PENDING" as const);
+
+    await this.db.insert(schema.paymentRefunds).values({
+      id: refundId,
+      paymentId,
+      tenantId: auth.tenantId,
+      amountMinor: input.amountMinor,
+      currency: payment.currency,
+      reason: input.reason,
+      status: initialStatus,
+      approvalStatus,
+      idempotencyKey: input.idempotencyKey,
+      requestedByUserId: auth.userId,
+    });
+
+    if (requiresApproval) {
+      const response = {
+        id: refundId,
+        paymentId,
+        amountMinor: input.amountMinor,
+        currency: payment.currency,
+        status: initialStatus,
+        approvalStatus,
+        reason: input.reason,
+        providerRefundId: null,
+        createdAt: new Date().toISOString(),
+      };
+      await this.storeIdempotency(auth.tenantId, input.idempotencyKey, requestHash, response);
+      return response;
+    }
+
+    const response = await this.executeProviderRefund(auth, paymentId, refundId, payment, {
+      amountMinor: input.amountMinor,
+      reason: input.reason,
+      idempotencyKey: input.idempotencyKey,
+      refundableRemaining,
+    });
+    await this.storeIdempotency(auth.tenantId, input.idempotencyKey, requestHash, response);
+    return response;
+  }
+
+  async approveRefund(auth: AuthContext, paymentId: string, refundId: string) {
+    if (!roleHasPermission(auth.role, PERMISSIONS.PAYMENT_REFUND)) {
+      throw new PaymentForbiddenError("Insufficient permission");
+    }
+    if (!["owner", "admin", "supervisor"].includes(auth.role)) {
+      throw new PaymentForbiddenError("Refund approval requires supervisor role");
+    }
+
+    const payment = await this.paymentService.getPaymentForTenant(auth, paymentId);
+    const refund = await this.db.query.paymentRefunds.findFirst({
+      where: and(
+        eq(schema.paymentRefunds.id, refundId),
+        eq(schema.paymentRefunds.paymentId, paymentId),
+        eq(schema.paymentRefunds.tenantId, auth.tenantId),
+      ),
+    });
+    if (!refund) throw new PaymentNotFoundError("Refund not found");
+    if (refund.approvalStatus !== "PENDING" || refund.status !== "PENDING_APPROVAL") {
+      throw new PaymentValidationError("Refund is not awaiting approval");
+    }
+    if (refund.requestedByUserId === auth.userId) {
+      throw new PaymentForbiddenError("Approver must differ from requester");
+    }
+
+    await this.db
+      .update(schema.paymentRefunds)
+      .set({
+        approvalStatus: "APPROVED",
+        approvedByUserId: auth.userId,
+        approvedAt: new Date(),
+        status: "PENDING",
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.paymentRefunds.id, refundId));
 
     const refundSumRows = await this.db
       .select({
@@ -78,33 +175,67 @@ export class RefundService {
           eq(schema.paymentRefunds.status, "SUCCEEDED"),
         ),
       );
-
     const refunded = refundSumRows[0]?.refunded ?? 0;
-    const refundableRemaining = payment.amountMinor - refunded;
-    if (input.amountMinor <= 0 || input.amountMinor > refundableRemaining) {
-      throw new PaymentValidationError("Invalid refund amount");
-    }
 
-    const refundId = uuidv4();
-    await this.db.insert(schema.paymentRefunds).values({
-      id: refundId,
-      paymentId,
-      tenantId: auth.tenantId,
-      amountMinor: input.amountMinor,
-      currency: payment.currency,
-      reason: input.reason,
-      status: "PENDING",
-      idempotencyKey: input.idempotencyKey,
-      requestedByUserId: auth.userId,
+    return this.executeProviderRefund(auth, paymentId, refundId, payment, {
+      amountMinor: refund.amountMinor,
+      reason: refund.reason,
+      idempotencyKey: refund.idempotencyKey,
+      refundableRemaining: payment.amountMinor - refunded,
     });
+  }
 
+  async rejectRefund(auth: AuthContext, paymentId: string, refundId: string, reason: string) {
+    if (!roleHasPermission(auth.role, PERMISSIONS.PAYMENT_REFUND)) {
+      throw new PaymentForbiddenError("Insufficient permission");
+    }
+    const refund = await this.db.query.paymentRefunds.findFirst({
+      where: and(
+        eq(schema.paymentRefunds.id, refundId),
+        eq(schema.paymentRefunds.paymentId, paymentId),
+        eq(schema.paymentRefunds.tenantId, auth.tenantId),
+      ),
+    });
+    if (!refund) throw new PaymentNotFoundError("Refund not found");
+    if (refund.approvalStatus !== "PENDING") {
+      throw new PaymentValidationError("Refund is not awaiting approval");
+    }
+    await this.db
+      .update(schema.paymentRefunds)
+      .set({
+        approvalStatus: "REJECTED",
+        status: "REJECTED",
+        rejectedByUserId: auth.userId,
+        rejectionReason: reason,
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.paymentRefunds.id, refundId));
+    return { id: refundId, status: "REJECTED", approvalStatus: "REJECTED" };
+  }
+
+  private async executeProviderRefund(
+    auth: AuthContext,
+    paymentId: string,
+    refundId: string,
+    payment: typeof schema.payments.$inferSelect,
+    input: {
+      amountMinor: number;
+      reason: string;
+      idempotencyKey: string;
+      refundableRemaining: number;
+    },
+  ) {
     if (payment.provider === "cash") {
-      const response = await this.finalizeRefund(payment, refundId, input.amountMinor, refundableRemaining);
-      await this.storeIdempotency(auth.tenantId, input.idempotencyKey, requestHash, response);
-      return response;
+      return this.finalizeRefund(payment, refundId, input.amountMinor, input.refundableRemaining);
     }
 
-    const adapter = createProviderAdapter(this.env, payment.provider);
+    const merchantConfigs = new MerchantConfigService(this.db, this.env);
+    const runtime = await merchantConfigs.resolveRuntimeConfig({
+      tenantId: payment.tenantId,
+      outletId: payment.outletId,
+      provider: payment.provider,
+    });
+    const adapter = createProviderAdapter(this.env, payment.provider, runtime);
     if (!adapter?.capabilities().refund) {
       throw new ProviderCapabilityError("Provider does not support refund");
     }
@@ -129,21 +260,19 @@ export class RefundService {
         .update(schema.paymentRefunds)
         .set({
           providerRefundId: result.providerRefundId,
-          status: result.normalizedStatus === "SUCCEEDED" ? "SUCCEEDED" : "PENDING",
+          status: result.normalizedStatus === "SUCCEEDED" ? "SUCCEEDED" : "PENDING_PROVIDER",
           updatedAt: new Date(),
         })
         .where(eq(schema.paymentRefunds.id, refundId));
 
       const refreshedPayment = await this.paymentService.getPaymentForTenant(auth, paymentId);
-      const response = await this.finalizeRefund(
+      return this.finalizeRefund(
         refreshedPayment,
         refundId,
         input.amountMinor,
-        refundableRemaining,
+        input.refundableRemaining,
         result.normalizedStatus === "SUCCEEDED",
       );
-      await this.storeIdempotency(auth.tenantId, input.idempotencyKey, requestHash, response);
-      return response;
     } catch (err) {
       await this.db
         .update(schema.paymentRefunds)
@@ -191,6 +320,7 @@ export class RefundService {
       amountMinor: refund.amountMinor,
       currency: refund.currency,
       status: refund.status,
+      approvalStatus: refund.approvalStatus,
       reason: refund.reason,
       providerRefundId: refund.providerRefundId,
       createdAt: refund.createdAt.toISOString(),

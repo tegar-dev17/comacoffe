@@ -2,14 +2,17 @@
 
 ## Implemented & tested
 
-- Payment domain + migrations
-- Midtrans adapter (Core API contract)
+- Payment domain + migrations (Phase 2: merchant provider config refs, refund approval, outbox retries, job leases)
+- Dev routes gated (`devRoutesEnabled`) + production JWT/env validation
+- Midtrans adapter (Core API contract) with per-tenant credential resolution
 - Xendit adapter (QR Codes + callback token)
-- REST API v1 + RBAC
-- Webhook dedupe + signature
-- Reconciliation admin endpoints
-- Unit + integration security tests
-- Admin dashboard (read-only list)
+- REST API v1 + RBAC + payment detail endpoint
+- Webhook dedupe + tenant-scoped signature verification
+- Scheduled reconciliation worker (lease-protected) + admin batch API
+- Refund approval workflow (separation of duties)
+- Unit + integration security tests (extended tenant isolation)
+- Admin dashboard list + payment detail page
+- Optional RLS SQL (`drizzle/0001_rls_optional.sql`) — apply manually when using non-superuser DB role
 
 ## Before production
 

@@ -4,6 +4,7 @@ import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 import sensible from "@fastify/sensible";
 import { loadEnv, validatePaymentProviderConfig } from "./config/env.js";
+import { validateProductionSecurity } from "./config/runtime.js";
 import { createDb, createDbPool } from "./db/client.js";
 import dbPlugin from "./plugins/db.plugin.js";
 import authPlugin from "./plugins/auth.plugin.js";
@@ -14,10 +15,12 @@ import { registerOrderRoutes } from "./routes/orders.routes.js";
 import { registerReconciliationRoutes } from "./routes/reconciliation.routes.js";
 import { registerDevRoutes } from "./routes/dev.routes.js";
 import { startOutboxWorker } from "./jobs/outbox.worker.js";
+import { startReconciliationScheduler } from "./jobs/reconciliation.worker.js";
 
 async function main() {
   const env = loadEnv();
   validatePaymentProviderConfig(env);
+  validateProductionSecurity(env);
 
   const pool = createDbPool(env.DATABASE_URL);
   const db = createDb(pool);
@@ -41,12 +44,14 @@ async function main() {
   await registerWebhookRoutes(app, env);
   await registerOrderRoutes(app);
   await registerReconciliationRoutes(app, env);
-  await registerDevRoutes(app);
+  await registerDevRoutes(app, env);
 
-  const stopOutbox = startOutboxWorker(db);
+  const stopOutbox = startOutboxWorker(db, env);
+  const stopReconciliation = startReconciliationScheduler(db, env);
 
   const shutdown = async () => {
     stopOutbox();
+    stopReconciliation();
     await app.close();
     await pool.end();
   };

@@ -5,6 +5,8 @@ export default defineConfig({
     "./src/db/schema/enums.ts",
     "./src/db/schema/core.ts",
     "./src/db/schema/payment.ts",
+    "./src/db/schema/provider-config.ts",
+    "./src/db/schema/jobs.ts",
   ],
   out: "./drizzle",
   dialect: "postgresql",

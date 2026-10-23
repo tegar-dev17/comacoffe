@@ -74,6 +74,21 @@ export async function registerPaymentRoutes(app: FastifyInstance, env: Env) {
   );
 
   app.get(
+    "/api/v1/payments/:paymentId/detail",
+    { preHandler: [app.authenticate] },
+    async (request, reply) => {
+      const { paymentId } = request.params as { paymentId: string };
+      try {
+        const result = await paymentService.getPaymentDetail(request.auth!, paymentId);
+        return { data: result };
+      } catch (err) {
+        const mapped = handlePaymentError(err);
+        return reply.status(mapped.status).send(mapped.body);
+      }
+    },
+  );
+
+  app.get(
     "/api/v1/payments",
     { preHandler: [app.authenticate] },
     async (request) => {
@@ -143,6 +158,45 @@ export async function registerPaymentRoutes(app: FastifyInstance, env: Env) {
       try {
         const result = await refundService.createRefund(request.auth!, paymentId, parsed.data);
         return reply.status(201).send({ data: result });
+      } catch (err) {
+        const mapped = handlePaymentError(err);
+        return reply.status(mapped.status).send(mapped.body);
+      }
+    },
+  );
+
+  app.post(
+    "/api/v1/payments/:paymentId/refunds/:refundId/approve",
+    { preHandler: [app.authenticate] },
+    async (request, reply) => {
+      const { paymentId, refundId } = request.params as { paymentId: string; refundId: string };
+      try {
+        const result = await refundService.approveRefund(request.auth!, paymentId, refundId);
+        return { data: result };
+      } catch (err) {
+        const mapped = handlePaymentError(err);
+        return reply.status(mapped.status).send(mapped.body);
+      }
+    },
+  );
+
+  app.post(
+    "/api/v1/payments/:paymentId/refunds/:refundId/reject",
+    { preHandler: [app.authenticate] },
+    async (request, reply) => {
+      const body = (request.body ?? {}) as { reason?: string };
+      const { paymentId, refundId } = request.params as { paymentId: string; refundId: string };
+      if (!body.reason || body.reason.length < 3) {
+        return reply.status(400).send({ error: "reason required" });
+      }
+      try {
+        const result = await refundService.rejectRefund(
+          request.auth!,
+          paymentId,
+          refundId,
+          body.reason,
+        );
+        return { data: result };
       } catch (err) {
         const mapped = handlePaymentError(err);
         return reply.status(mapped.status).send(mapped.body);

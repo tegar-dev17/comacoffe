@@ -135,7 +135,9 @@ export default function PaymentsPage() {
               {rows.map((row) => (
                 <tr key={row.id}>
                   <td>
-                    <code>{row.id.slice(0, 8)}…</code>
+                    <a href={`/payments/${row.id}`}>
+                      <code>{row.id.slice(0, 8)}…</code>
+                    </a>
                   </td>
                   <td>
                     <code>{row.orderId.slice(0, 8)}…</code>

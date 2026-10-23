@@ -220,7 +220,7 @@ describe("payment security integration", () => {
           provider: "midtrans",
           status: "PENDING",
           providerReference: "ORD-WH-5",
-          providerPaymentId: "tx-wh-5",
+          providerPaymentId: `tx-wh-5-${crypto.randomUUID()}`,
         })
         .where(eq(schema.payments.id, paymentId));
     }
@@ -247,6 +247,10 @@ describe("payment security integration", () => {
     const env = loadEnv({ MIDTRANS_SERVER_KEY: "SB-Mid-server-test-key" });
     const webhookService = new WebhookService(db, env);
 
+    const dupSuffix = crypto.randomUUID().slice(0, 8);
+    const providerReference = `ORD-DUP-${dupSuffix}`;
+    const transactionId = `tx-dup-${dupSuffix}`;
+
     const [payment] = await db
       .insert(schema.payments)
       .values({
@@ -254,9 +258,9 @@ describe("payment security integration", () => {
         outletId: outletA,
         orderId: orderA,
         provider: "midtrans",
-        providerPaymentId: "tx-dup-1",
-        providerReference: "ORD-DUP-1",
-        idempotencyKey: "idem-dup-pay",
+        providerPaymentId: transactionId,
+        providerReference,
+        idempotencyKey: `idem-dup-pay-${dupSuffix}`,
         paymentMethod: "qris",
         amountMinor: 10000,
         currency: "IDR",
@@ -265,11 +269,11 @@ describe("payment security integration", () => {
       .returning();
 
     const body = {
-      order_id: "ORD-DUP-1",
+      order_id: providerReference,
       status_code: "200",
       gross_amount: "10000.00",
       transaction_status: "settlement",
-      transaction_id: "tx-dup-1",
+      transaction_id: transactionId,
     };
     const signature = createHash("sha512")
       .update(`${body.order_id}${body.status_code}${body.gross_amount}${env.MIDTRANS_SERVER_KEY}`)
@@ -281,7 +285,9 @@ describe("payment security integration", () => {
     const events = await db
       .select()
       .from(schema.paymentWebhookEvents)
-      .where(eq(schema.paymentWebhookEvents.providerEventId, "tx-dup-1:settlement:200"));
+      .where(
+        eq(schema.paymentWebhookEvents.providerEventId, `${transactionId}:settlement:200`),
+      );
 
     expect(events.length).toBe(1);
 

@@ -2,6 +2,7 @@ import type { Env } from "../../../config/env.js";
 import type { PaymentStatus } from "../types.js";
 import { ProviderCapabilityError } from "./midtrans.adapter.js";
 import type { PaymentProviderAdapter } from "./interface.js";
+import type { ProviderRuntimeConfig } from "./runtime-config.js";
 
 interface XenditQrResponse {
   id: string;
@@ -29,7 +30,10 @@ interface XenditQrPaymentCallback {
 export class XenditAdapter implements PaymentProviderAdapter {
   readonly name = "xendit" as const;
 
-  constructor(private readonly env: Env) {}
+  constructor(
+    private readonly env: Env,
+    private readonly runtime?: ProviderRuntimeConfig,
+  ) {}
 
   capabilities() {
     return {
@@ -41,16 +45,25 @@ export class XenditAdapter implements PaymentProviderAdapter {
     };
   }
 
-  private authHeader(): string {
-    const key = this.env.XENDIT_SECRET_KEY;
+  private secretKey(): string {
+    const key = this.runtime?.credentials.serverKey ?? this.env.XENDIT_SECRET_KEY;
     if (!key) {
-      throw new Error("XENDIT_SECRET_KEY is not configured");
+      throw new Error("Xendit secret key is not configured");
     }
-    return `Basic ${Buffer.from(`${key}:`).toString("base64")}`;
+    return key;
+  }
+
+  private webhookToken(): string | undefined {
+    return this.runtime?.credentials.webhookToken ?? this.env.XENDIT_WEBHOOK_TOKEN;
+  }
+
+  private authHeader(): string {
+    return `Basic ${Buffer.from(`${this.secretKey()}:`).toString("base64")}`;
   }
 
   private baseUrl(): string {
-    return this.env.XENDIT_API_BASE_URL.replace(/\/$/, "");
+    const base = this.runtime?.credentials.apiBaseUrl ?? this.env.XENDIT_API_BASE_URL;
+    return base.replace(/\/$/, "");
   }
 
   normalizeProviderStatus(providerStatus: string): PaymentStatus {
@@ -179,7 +192,7 @@ export class XenditAdapter implements PaymentProviderAdapter {
 
   verifyWebhook(headers: Record<string, string | string[] | undefined>, body: unknown): boolean {
     void body;
-    const token = this.env.XENDIT_WEBHOOK_TOKEN;
+    const token = this.webhookToken();
     if (!token) return false;
     const header = headers["x-callback-token"] ?? headers["X-CALLBACK-TOKEN"];
     const received = Array.isArray(header) ? header[0] : header;

@@ -5,6 +5,7 @@ import * as schema from "../../../db/schema/index.js";
 import { createProviderAdapter } from "../providers/factory.js";
 import type { PaymentProvider } from "../types.js";
 import { PaymentService } from "./payment.service.js";
+import { MerchantConfigService } from "./merchant-config.service.js";
 
 type Db = NodePgDatabase<typeof schema>;
 
@@ -23,19 +24,42 @@ export class WebhookService {
     headers: Record<string, string | string[] | undefined>,
     body: unknown,
   ) {
-    const adapter = createProviderAdapter(this.env, provider);
-    if (!adapter) {
+    const probeAdapter = createProviderAdapter(this.env, provider);
+    if (!probeAdapter) {
       throw new Error("Invalid webhook provider");
     }
 
-    const signatureValid = adapter.verifyWebhook(headers, body);
-    const parsed = adapter.parseWebhookEvent(body);
+    const parsed = probeAdapter.parseWebhookEvent(body);
+    const payment =
+      (parsed.providerReference
+        ? await this.paymentService.getPaymentByProviderReference(parsed.providerReference)
+        : null) ??
+      (parsed.providerPaymentId
+        ? await this.db.query.payments.findFirst({
+            where: eq(schema.payments.providerPaymentId, parsed.providerPaymentId),
+          })
+        : null);
+
+    let signatureValid = false;
+    if (payment && payment.provider === provider) {
+      const merchantConfigs = new MerchantConfigService(this.db, this.env);
+      const runtime = await merchantConfigs.resolveRuntimeConfig({
+        tenantId: payment.tenantId,
+        outletId: payment.outletId,
+        provider,
+      });
+      const adapter = createProviderAdapter(this.env, provider, runtime);
+      signatureValid = adapter?.verifyWebhook(headers, body) ?? false;
+    } else {
+      signatureValid = probeAdapter.verifyWebhook(headers, body);
+    }
 
     const insertResult = await this.db
       .insert(schema.paymentWebhookEvents)
       .values({
         provider,
         providerEventId: parsed.providerEventId,
+        paymentId: payment?.id,
         rawHeadersJson: sanitizeHeaders(headers),
         rawBodyJson: body as Record<string, unknown>,
         signatureValid,
@@ -60,16 +84,6 @@ export class WebhookService {
         .update(schema.paymentWebhookEvents)
         .set({ processingStatus: "PROCESSING" })
         .where(eq(schema.paymentWebhookEvents.id, webhookRow.id));
-
-      const payment =
-        (await this.paymentService.getPaymentByProviderReference(
-          parsed.providerReference ?? "",
-        )) ??
-        (parsed.providerPaymentId
-          ? await this.db.query.payments.findFirst({
-              where: eq(schema.payments.providerPaymentId, parsed.providerPaymentId),
-            })
-          : null);
 
       if (!payment) {
         await this.db

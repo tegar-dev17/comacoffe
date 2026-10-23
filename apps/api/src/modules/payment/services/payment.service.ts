@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, lte, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { v4 as uuidv4 } from "uuid";
 import type { Env } from "../../../config/env.js";
@@ -11,6 +11,8 @@ import { ProviderCapabilityError } from "../providers/midtrans.adapter.js";
 import { resolveTransition, isPaidStatus } from "../state-machine.js";
 import type { CreatePaymentInput, PaymentMethod, PaymentProvider } from "../types.js";
 import { stableHash } from "../utils/hash.js";
+import { MerchantConfigService } from "./merchant-config.service.js";
+import { enqueueOutboxEvent } from "./outbox.service.js";
 
 type Db = NodePgDatabase<typeof schema>;
 
@@ -19,6 +21,17 @@ export class PaymentService {
     private readonly db: Db,
     private readonly env: Env,
   ) {}
+
+  private async resolveAdapterForPayment(payment: typeof schema.payments.$inferSelect) {
+    if (payment.provider === "cash") return null;
+    const merchantConfigs = new MerchantConfigService(this.db, this.env);
+    const runtime = await merchantConfigs.resolveRuntimeConfig({
+      tenantId: payment.tenantId,
+      outletId: payment.outletId,
+      provider: payment.provider,
+    });
+    return createProviderAdapter(this.env, payment.provider, runtime);
+  }
 
   private assertPermission(auth: AuthContext, permission: string) {
     if (!roleHasPermission(auth.role, permission as (typeof PERMISSIONS)[keyof typeof PERMISSIONS])) {
@@ -96,7 +109,13 @@ export class PaymentService {
       if (provider === "cash") {
         providerResult = createCashPaymentResult({ paymentId, amountMinor: order.totalMinor });
       } else {
-        const adapter = createProviderAdapter(this.env, provider);
+        const merchantConfigs = new MerchantConfigService(this.db, this.env);
+        const runtime = await merchantConfigs.resolveRuntimeConfig({
+          tenantId: auth.tenantId,
+          outletId: order.outletId,
+          provider,
+        });
+        const adapter = createProviderAdapter(this.env, provider, runtime);
         if (!adapter) throw new Error("Provider adapter missing");
         providerResult = await adapter.createPayment({
           paymentId,
@@ -235,7 +254,7 @@ export class PaymentService {
     if (payment.provider === "cash") {
       return this.toPublicPayment(payment);
     }
-    const adapter = createProviderAdapter(this.env, payment.provider);
+    const adapter = await this.resolveAdapterForPayment(payment);
     if (!adapter?.capabilities().inquiry) {
       throw new ProviderCapabilityError("Provider does not support inquiry");
     }
@@ -291,7 +310,7 @@ export class PaymentService {
       await this.applyStatusTransition(payment, "CANCELLED", "api.cancel", undefined, {});
       return this.toPublicPayment(await this.getPaymentForTenant(auth, paymentId));
     }
-    const adapter = createProviderAdapter(this.env, payment.provider);
+    const adapter = await this.resolveAdapterForPayment(payment);
     if (!adapter?.capabilities().cancel) {
       throw new ProviderCapabilityError("Provider does not support cancel");
     }
@@ -342,9 +361,75 @@ export class PaymentService {
           .set({ status: "paid", paidAt: new Date(), updatedAt: new Date() })
           .where(eq(schema.orders.id, payment.orderId));
       }
+
+      await enqueueOutboxEvent(tx, {
+        tenantId: payment.tenantId,
+        aggregateType: "payment",
+        aggregateId: payment.id,
+        eventType: "payment.status_changed",
+        dedupeKey: `payment:${payment.id}:status:${next}:${providerEventId ?? source}`,
+        payload: {
+          paymentId: payment.id,
+          orderId: payment.orderId,
+          fromStatus: payment.status,
+          toStatus: next,
+          source,
+        },
+      });
     });
 
     return { ...payment, status: next };
+  }
+
+  async getPaymentDetail(auth: AuthContext, paymentId: string) {
+    const payment = await this.getPaymentForTenant(auth, paymentId);
+    const events = await this.db
+      .select()
+      .from(schema.paymentEvents)
+      .where(eq(schema.paymentEvents.paymentId, paymentId))
+      .orderBy(asc(schema.paymentEvents.createdAt));
+    const refunds = await this.db.query.paymentRefunds.findMany({
+      where: eq(schema.paymentRefunds.paymentId, paymentId),
+    });
+    const reconciliations = await this.db.query.paymentReconciliations.findMany({
+      where: eq(schema.paymentReconciliations.paymentId, paymentId),
+    });
+    const attempts = await this.db.query.paymentAttempts.findMany({
+      where: eq(schema.paymentAttempts.paymentId, paymentId),
+    });
+
+    return {
+      payment: this.toPublicPayment(payment),
+      statusHistory: events.map((e) => ({
+        id: e.id,
+        fromStatus: e.fromStatus,
+        toStatus: e.toStatus,
+        source: e.source,
+        createdAt: e.createdAt.toISOString(),
+      })),
+      refunds: refunds.map((r) => ({
+        id: r.id,
+        amountMinor: r.amountMinor,
+        status: r.status,
+        approvalStatus: r.approvalStatus,
+        reason: r.reason,
+        createdAt: r.createdAt.toISOString(),
+      })),
+      reconciliations: reconciliations.map((r) => ({
+        id: r.id,
+        status: r.status,
+        notes: r.notes,
+        providerStatus: r.providerStatus,
+        createdAt: r.createdAt.toISOString(),
+      })),
+      inquiries: attempts.map((a) => ({
+        id: a.id,
+        attemptNumber: a.attemptNumber,
+        httpStatus: a.httpStatus,
+        errorMessage: a.errorMessage,
+        createdAt: a.createdAt.toISOString(),
+      })),
+    };
   }
 
   async markOrderPaid(orderId: string) {
