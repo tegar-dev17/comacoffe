@@ -1,0 +1,22 @@
+{
+  "name": "comacoffe",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w @comacoffe/api && npm run build -w @comacoffe/web",
+    "dev": "npm run dev -w @comacoffe/api",
+    "dev:web": "npm run dev -w @comacoffe/web",
+    "test": "npm run test -w @comacoffe/api",
+    "test:integration": "npm run test:integration -w @comacoffe/api",
+    "lint": "npm run lint -w @comacoffe/api && npm run lint -w @comacoffe/web",
+    "typecheck": "npm run typecheck -w @comacoffe/api && npm run typecheck -w @comacoffe/web",
+    "db:generate": "npm run db:generate -w @comacoffe/api",
+    "db:migrate": "npm run db:migrate -w @comacoffe/api"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
