@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { apiFetch } from "@/lib/api-client";
+import { API_BASE, apiFetch } from "@/lib/api-client";
 import { getToken } from "@/lib/auth";
 import { formatDateTimeId, formatIdr } from "@/lib/format";
 
@@ -12,7 +12,17 @@ type PaymentInstructions = {
   qrString?: string;
   expiresAt?: string;
   message?: string;
+  stagingFallback?: boolean;
 };
+
+function qrDisplayUrl(instructions: PaymentInstructions | null | undefined): string | null {
+  if (!instructions) return null;
+  if (instructions.qrCodeUrl) return instructions.qrCodeUrl;
+  if (instructions.qrString) {
+    return `https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=${encodeURIComponent(instructions.qrString)}`;
+  }
+  return null;
+}
 
 type Detail = {
   payment: {
@@ -43,6 +53,7 @@ export default function PaymentDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [simulating, setSimulating] = useState(false);
 
   const load = useCallback(async () => {
     if (!token) {
@@ -94,6 +105,28 @@ export default function PaymentDetailPage() {
 
   const instructions = detail?.payment.instructions;
   const isPending = detail?.payment.status === "PENDING";
+  const qrImageUrl = qrDisplayUrl(instructions);
+  const showStagingSimulate = Boolean(isPending && instructions?.stagingFallback);
+
+  async function simulateStagingPayment() {
+    setSimulating(true);
+    setError(null);
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/v1/dev/payments/${params.paymentId}/simulate-success`,
+        { method: "POST" },
+      );
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(typeof body.error === "string" ? body.error : "Simulasi gagal");
+      }
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Simulasi gagal");
+    } finally {
+      setSimulating(false);
+    }
+  }
 
   return (
     <div>
@@ -135,18 +168,19 @@ export default function PaymentDetailPage() {
             </p>
           </div>
 
-          {isPending && instructions?.qrCodeUrl ? (
+          {isPending && qrImageUrl ? (
             <div className="card qris-panel">
-              <h2>Scan QRIS</h2>
-              <p className="muted">{instructions.message ?? "Scan dengan aplikasi pembayaran Anda."}</p>
+              <h2>{instructions?.stagingFallback ? "QRIS staging" : "Scan QRIS"}</h2>
+              <p className="muted">{instructions?.message ?? "Scan dengan aplikasi pembayaran Anda."}</p>
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={instructions.qrCodeUrl}
-                alt="QRIS payment code"
-                className="qris-image"
-              />
-              {instructions.expiresAt ? (
+              <img src={qrImageUrl} alt="QRIS payment code" className="qris-image" />
+              {instructions?.expiresAt ? (
                 <p className="muted">Kedaluwarsa: {formatDateTimeId(instructions.expiresAt)}</p>
+              ) : null}
+              {showStagingSimulate ? (
+                <button type="button" onClick={() => void simulateStagingPayment()} disabled={simulating}>
+                  {simulating ? "Menyelesaikan…" : "Simulasikan pembayaran berhasil (demo)"}
+                </button>
               ) : null}
             </div>
           ) : null}

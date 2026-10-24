@@ -37,6 +37,11 @@ const envSchema = z.object({
     (val) => val === "true" || val === true,
     z.boolean().default(false),
   ),
+  /** Dev/staging only: mock QRIS when Midtrans returns "channel not activated". */
+  ENABLE_QRIS_STAGING_FALLBACK: z.preprocess(
+    (val) => val === "true" || val === true,
+    z.boolean().default(false),
+  ),
   REFUND_APPROVAL_THRESHOLD_MINOR: z.coerce.number().int().positive().default(500_000),
   RECONCILIATION_INTERVAL_MS: z.coerce.number().int().positive().default(60_000),
   RECONCILIATION_STALE_MINUTES: z.coerce.number().int().positive().default(15),

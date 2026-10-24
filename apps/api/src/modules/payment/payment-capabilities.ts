@@ -1,5 +1,6 @@
 import type { Env } from "../../config/env.js";
 import { devRoutesEnabled } from "../../config/runtime.js";
+import { qrisStagingFallbackEnabled } from "./qris-staging-fallback.js";
 import {
   isMidtransProductionServerKey,
   isMidtransSandboxServerKey,
@@ -39,12 +40,17 @@ export function resolvePosPaymentCapabilities(env: Env) {
   const midtransEnv =
     env.PAYMENT_PROVIDER === "midtrans" ? resolveMidtransEnvironment(env) : undefined;
 
+  const stagingFallback = qrisStagingFallbackEnabled(env);
+
   return {
     cash: true,
     qris: qrisLive || devMock,
     qrisDevMock: devMock,
+    qrisStagingFallback: stagingFallback,
     qrisProvider: env.PAYMENT_PROVIDER,
-    qrisHint,
+    qrisHint: stagingFallback
+      ? "QRIS Midtrans production belum aktif di dashboard — checkout akan pakai QR staging + simulasi sampai channel diaktifkan."
+      : qrisHint,
     midtransEnvironment: midtransEnv,
     midtransProductionReady:
       env.PAYMENT_PROVIDER === "midtrans" &&

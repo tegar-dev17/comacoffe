@@ -7,6 +7,11 @@ import type { AuthContext } from "../../auth/types.js";
 import { PERMISSIONS, roleHasPermission } from "../../auth/permissions.js";
 import { createProviderAdapter } from "../providers/factory.js";
 import { createCashPaymentResult } from "../providers/cash.handler.js";
+import {
+  isQrisChannelNotActivatedError,
+  qrisStagingFallbackEnabled,
+} from "../qris-staging-fallback.js";
+import { DevMidtransAdapter } from "../providers/dev-midtrans.adapter.js";
 import { ProviderCapabilityError } from "../providers/midtrans.adapter.js";
 import { resolveTransition, isPaidStatus } from "../state-machine.js";
 import type { CreatePaymentInput, PaymentMethod, PaymentProvider } from "../types.js";
@@ -186,7 +191,7 @@ export class PaymentService {
         const orderLines = await this.db.query.orderItems.findMany({
           where: eq(schema.orderItems.orderId, order.id),
         });
-        providerResult = await adapter.createPayment({
+        const chargeParams = {
           paymentId,
           orderId: order.id,
           orderReference: providerReference,
@@ -199,7 +204,20 @@ export class PaymentService {
             priceMinor: line.unitPriceMinor,
             quantity: line.quantity,
           })),
-        });
+        };
+        try {
+          providerResult = await adapter.createPayment(chargeParams);
+        } catch (providerErr) {
+          if (
+            qrisStagingFallbackEnabled(this.env) &&
+            input.paymentMethod === "qris" &&
+            isQrisChannelNotActivatedError(providerErr)
+          ) {
+            providerResult = await new DevMidtransAdapter().createPayment(chargeParams);
+          } else {
+            throw providerErr;
+          }
+        }
       }
     } catch (err) {
       attemptError = err instanceof Error ? err.message : "Provider error";

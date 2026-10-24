@@ -1,4 +1,5 @@
 import type { PaymentStatus } from "../types.js";
+import { qrCodeImageUrlFromString } from "../qris-staging-fallback.js";
 import type { PaymentProviderAdapter } from "./interface.js";
 import { ProviderCapabilityError } from "./midtrans.adapter.js";
 
@@ -26,15 +27,18 @@ export class DevMidtransAdapter implements PaymentProviderAdapter {
     metadata?: Record<string, unknown>;
   }) {
     const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
+    const qrString = `000201DEVMOCK${params.orderReference.slice(0, 20)}`;
     return {
       providerPaymentId: `dev-midtrans-${params.paymentId}`,
       providerReference: params.orderReference,
       normalizedStatus: "PENDING" as PaymentStatus,
       instructions: {
         type: "qris" as const,
-        qrString: `000201DEVMOCK${params.orderReference.slice(0, 20)}`,
+        qrString,
+        qrCodeUrl: qrCodeImageUrlFromString(qrString),
+        stagingFallback: true,
         message:
-          "QRIS dev mock — gunakan POST /api/v1/dev/payments/:paymentId/simulate-success untuk menyelesaikan pembayaran.",
+          "QRIS staging (Midtrans belum mengaktifkan channel QRIS di merchant Anda). Scan tidak menarik dana nyata — gunakan tombol simulasi di halaman ini.",
         expiresAt: expiresAt.toISOString(),
       },
       rawResponse: { source: "dev_midtrans_mock", amountMinor: params.amountMinor, currency: params.currency },
