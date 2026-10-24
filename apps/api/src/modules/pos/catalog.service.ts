@@ -95,12 +95,22 @@ export class CatalogService {
     }));
   }
 
-  async listProductsAdmin(auth: AuthContext) {
+  async listProductsAdmin(auth: AuthContext, page = 1, limit = 50) {
     this.assertPermission(auth, PERMISSIONS.PRODUCT_MANAGE);
-    return this.db.query.products.findMany({
+    const cap = Math.min(100, Math.max(1, limit));
+    const offset = (Math.max(1, page) - 1) * cap;
+    const rows = await this.db.query.products.findMany({
       where: eq(schema.products.tenantId, auth.tenantId),
       orderBy: asc(schema.products.name),
+      limit: cap,
+      offset,
     });
+    const countRows = await this.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(schema.products)
+      .where(eq(schema.products.tenantId, auth.tenantId));
+    const total = countRows[0]?.count ?? 0;
+    return { rows, pagination: { page: Math.max(1, page), limit: cap, total } };
   }
 
   async upsertProduct(

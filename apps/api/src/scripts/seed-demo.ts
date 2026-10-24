@@ -3,7 +3,7 @@
  * Run: ALLOW_DEMO_SEED=1 npm run db:seed-demo -w @comacoffe/api
  */
 import "dotenv/config";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { createDb, createDbPool } from "../db/client.js";
 import * as schema from "../db/schema/index.js";
 import { hashPassword } from "../modules/auth/password.js";
@@ -29,13 +29,50 @@ async function main() {
   const existing = await db.query.tenants.findFirst({
     where: eq(schema.tenants.slug, "demo-coffee"),
   });
+  const passwordHash = hashPassword(DEMO_PASSWORD);
+
   if (existing) {
     console.log("Demo tenant already exists:", existing.id);
+    for (const email of ["admin@demo.coffee", "cashier@demo.coffee"]) {
+      await db
+        .update(schema.users)
+        .set({ passwordHash, isActive: true, updatedAt: new Date() })
+        .where(and(eq(schema.users.tenantId, existing.id), eq(schema.users.email, email)));
+    }
+    const outlet = await db.query.outlets.findFirst({
+      where: eq(schema.outlets.tenantId, existing.id),
+    });
+    const productCount = await db.query.products.findMany({
+      where: eq(schema.products.tenantId, existing.id),
+      limit: 1,
+    });
+    if (outlet && productCount.length === 0) {
+      const [coffeeCat] = await db
+        .insert(schema.productCategories)
+        .values({ tenantId: existing.id, name: "Coffee", sortOrder: 1 })
+        .returning();
+      const [product] = await db
+        .insert(schema.products)
+        .values({
+          tenantId: existing.id,
+          name: "Espresso",
+          sku: "ESP-E2E",
+          priceMinor: 18000,
+          categoryId: coffeeCat!.id,
+        })
+        .returning();
+      await db.insert(schema.outletProductStock).values({
+        outletId: outlet.id,
+        productId: product!.id,
+        quantityOnHand: 50,
+      });
+      console.log("Added fallback demo product for E2E");
+    }
+    console.log("Refreshed demo user passwords for tenant", existing.id);
     await pool.end();
     return;
   }
 
-  const passwordHash = hashPassword(DEMO_PASSWORD);
   const [tenant] = await db
     .insert(schema.tenants)
     .values({ name: "Demo Coffee", slug: "demo-coffee" })

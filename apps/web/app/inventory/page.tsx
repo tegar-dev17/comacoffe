@@ -12,11 +12,14 @@ type Movement = {
   createdAt: string;
 };
 
+type Product = { id: string; name: string; sku: string | null };
+
 export default function InventoryPage() {
   const token = getToken();
   const user = getStoredUser();
   const outletId = user?.outletId ?? "";
   const [movements, setMovements] = useState<Movement[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
   const [productId, setProductId] = useState("");
   const [delta, setDelta] = useState(1);
   const [reason, setReason] = useState("Stok masuk");
@@ -25,11 +28,16 @@ export default function InventoryPage() {
 
   const load = useCallback(async () => {
     if (!token || !outletId) return;
-    const res = await apiFetch<{ data: Movement[] }>(
-      `/api/v1/catalog/inventory/movements?outletId=${outletId}&limit=50`,
-      { token },
-    );
-    setMovements(res.data);
+    const [mov, prod] = await Promise.all([
+      apiFetch<{ data: Movement[] }>(
+        `/api/v1/catalog/inventory/movements?outletId=${outletId}&limit=50`,
+        { token },
+      ),
+      apiFetch<{ data: Product[] }>(`/api/v1/catalog/products?outletId=${outletId}`, { token }),
+    ]);
+    setMovements(mov.data);
+    setProducts(prod.data);
+    if (!productId && prod.data[0]) setProductId(prod.data[0].id);
   }, [token, outletId]);
 
   useEffect(() => {
@@ -54,7 +62,7 @@ export default function InventoryPage() {
   }
 
   if (!outletId) {
-    return <p className="error">Login sebagai admin/supervisor dengan outlet, atau gunakan akun kasir.</p>;
+    return <p className="error">Login dengan outlet (kasir/admin outlet) untuk inventori.</p>;
   }
 
   return (
@@ -63,8 +71,14 @@ export default function InventoryPage() {
       <div className="card stack">
         <h2>Penyesuaian stok</h2>
         <label>
-          Product ID (UUID)
-          <input value={productId} onChange={(e) => setProductId(e.target.value)} />
+          Produk
+          <select value={productId} onChange={(e) => setProductId(e.target.value)}>
+            {products.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name} {p.sku ? `(${p.sku})` : ""}
+              </option>
+            ))}
+          </select>
         </label>
         <label>
           Delta (+/-)
@@ -95,7 +109,7 @@ export default function InventoryPage() {
             {movements.map((m) => (
               <tr key={m.id}>
                 <td>{new Date(m.createdAt).toLocaleString("id-ID")}</td>
-                <td>{m.productId.slice(0, 8)}…</td>
+                <td>{products.find((p) => p.id === m.productId)?.name ?? m.productId.slice(0, 8)}</td>
                 <td>{m.delta}</td>
                 <td>{m.reason}</td>
               </tr>

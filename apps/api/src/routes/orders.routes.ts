@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, lte } from "drizzle-orm";
+import { and, desc, eq, gte, lte, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import * as schema from "../db/schema/index.js";
@@ -51,6 +51,12 @@ export async function registerOrderRoutes(app: FastifyInstance) {
         offset,
       });
 
+      const totalRows = await app.db
+        .select({ total: sql<number>`count(*)::int` })
+        .from(schema.orders)
+        .where(and(...conditions));
+      const total = totalRows[0]?.total ?? 0;
+
       return {
         data: rows.map((o) => ({
           id: o.id,
@@ -62,7 +68,7 @@ export async function registerOrderRoutes(app: FastifyInstance) {
           paidAt: o.paidAt?.toISOString() ?? null,
           createdAt: o.createdAt.toISOString(),
         })),
-        pagination: { page, limit },
+        pagination: { page, limit, total: total ?? 0 },
       };
     },
   );

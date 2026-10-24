@@ -54,6 +54,8 @@ export function ClientShell({ children }: { children: React.ReactNode }) {
           <Link href="/staff">Staf</Link>
           <Link href="/settings">Pengaturan</Link>
           <Link href="/payments">Payments</Link>
+          <Link href="/refunds">Refund</Link>
+          <Link href="/payment-provider">Provider</Link>
           {user ? (
             <button type="button" className="link-btn" onClick={logout}>
               Logout ({user.displayName})

@@ -22,6 +22,8 @@ import { registerReportRoutes } from "./routes/reports.routes.js";
 import { registerSettingsRoutes } from "./routes/settings.routes.js";
 import { registerStaffRoutes } from "./routes/staff.routes.js";
 import { registerShiftRoutes } from "./routes/shifts.routes.js";
+import { registerRefundRoutes } from "./routes/refunds.routes.js";
+import { registerMerchantConfigRoutes } from "./routes/merchant-config.routes.js";
 import { registerPublicRoutes } from "./routes/public.routes.js";
 import { startOutboxWorker } from "./jobs/outbox.worker.js";
 import { startReconciliationScheduler } from "./jobs/reconciliation.worker.js";
@@ -60,6 +62,8 @@ async function main() {
   await registerSettingsRoutes(app, env);
   await registerStaffRoutes(app);
   await registerShiftRoutes(app);
+  await registerRefundRoutes(app);
+  await registerMerchantConfigRoutes(app, env);
   await registerReconciliationRoutes(app, env);
   await registerDevRoutes(app, env);
 

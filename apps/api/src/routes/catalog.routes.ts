@@ -50,15 +50,19 @@ export async function registerCatalogRoutes(app: FastifyInstance) {
         admin?: string;
         categoryId?: string;
         barcode?: string;
+        page?: string;
+        limit?: string;
       };
       try {
         if (qs.admin === "1") {
           if (!roleHasPermission(request.auth!.role, PERMISSIONS.PRODUCT_MANAGE)) {
             return reply.status(403).send({ error: "Insufficient permission" });
           }
-          const rows = await catalog.listProductsAdmin(request.auth!);
+          const page = Math.max(1, Number(qs.page ?? 1));
+          const limit = Math.min(100, Math.max(1, Number(qs.limit ?? 50)));
+          const result = await catalog.listProductsAdmin(request.auth!, page, limit);
           return {
-            data: rows.map((p) => ({
+            data: result.rows.map((p) => ({
               id: p.id,
               name: p.name,
               sku: p.sku,
@@ -67,7 +71,9 @@ export async function registerCatalogRoutes(app: FastifyInstance) {
               categoryId: p.categoryId,
               isActive: p.isActive,
               trackInventory: p.trackInventory,
+              barcode: p.barcode,
             })),
+            pagination: result.pagination,
           };
         }
         if (!qs.outletId) {

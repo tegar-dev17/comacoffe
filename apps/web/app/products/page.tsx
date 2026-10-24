@@ -19,17 +19,22 @@ export default function ProductsPage() {
   const user = getStoredUser();
   const canManage = user?.role === "admin" || user?.role === "owner" || user?.role === "supervisor";
   const [rows, setRows] = useState<ProductRow[]>([]);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const limit = 20;
   const [name, setName] = useState("");
   const [priceMinor, setPriceMinor] = useState(25000);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!token) return;
-    const res = await apiFetch<{ data: ProductRow[] }>("/api/v1/catalog/products?admin=1", {
-      token,
-    });
+    const res = await apiFetch<{ data: ProductRow[]; pagination?: { total: number } }>(
+      `/api/v1/catalog/products?admin=1&page=${page}&limit=${limit}`,
+      { token },
+    );
     setRows(res.data);
-  }, [token]);
+    setTotal(res.pagination?.total ?? res.data.length);
+  }, [token, page]);
 
   useEffect(() => {
     void load().catch((e) => setError(e instanceof Error ? e.message : "Load failed"));
@@ -93,6 +98,17 @@ export default function ProductsPage() {
             ))}
           </tbody>
         </table>
+      </div>
+      <div className="filters">
+        <button type="button" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+          Sebelumnya
+        </button>
+        <span className="muted">
+          Halaman {page} · {total} produk
+        </span>
+        <button type="button" disabled={page * limit >= total} onClick={() => setPage((p) => p + 1)}>
+          Berikutnya
+        </button>
       </div>
     </div>
   );

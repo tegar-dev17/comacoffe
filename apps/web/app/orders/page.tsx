@@ -18,14 +18,23 @@ type OrderRow = {
 export default function OrdersPage() {
   const token = getToken();
   const [rows, setRows] = useState<OrderRow[]>([]);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const limit = 20;
 
   useEffect(() => {
     if (!token) return;
-    apiFetch<{ data: OrderRow[] }>("/api/v1/orders?status=paid&limit=50", { token })
-      .then((res) => setRows(res.data))
+    apiFetch<{ data: OrderRow[]; pagination: { total: number } }>(
+      `/api/v1/orders?status=paid&limit=${limit}&page=${page}`,
+      { token },
+    )
+      .then((res) => {
+        setRows(res.data);
+        setTotal(res.pagination?.total ?? res.data.length);
+      })
       .catch((e) => setError(e instanceof Error ? e.message : "Load failed"));
-  }, [token]);
+  }, [token, page]);
 
   return (
     <div>
@@ -55,6 +64,21 @@ export default function OrdersPage() {
           </tbody>
         </table>
         {rows.length === 0 ? <p className="muted">Belum ada transaksi selesai.</p> : null}
+      </div>
+      <div className="filters">
+        <button type="button" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+          Sebelumnya
+        </button>
+        <span className="muted">
+          Halaman {page} · {total} transaksi
+        </span>
+        <button
+          type="button"
+          disabled={page * limit >= total}
+          onClick={() => setPage((p) => p + 1)}
+        >
+          Berikutnya
+        </button>
       </div>
     </div>
   );
