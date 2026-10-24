@@ -35,13 +35,4 @@ export async function fetchPayments(params: {
   }>;
 }
 
-/**
- * Deterministic IDR formatting (SSR + client must match).
- * Avoid Intl currency style — Node and browsers differ on spacing (e.g. "Rp 0" vs "Rp0").
- */
-export function formatIdr(amountMinor: number) {
-  const sign = amountMinor < 0 ? "-" : "";
-  const digits = Math.abs(Math.trunc(amountMinor)).toString();
-  const withSeparators = digits.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
-  return `${sign}Rp${withSeparators}`;
-}
+export { formatIdr, formatDateTimeId } from "./format";
