@@ -5,6 +5,8 @@ import { MidtransAdapter } from "./midtrans.adapter.js";
 import { XenditAdapter } from "./xendit.adapter.js";
 import type { ProviderRuntimeConfig } from "./runtime-config.js";
 import { fallbackRuntimeFromEnv } from "./runtime-config.js";
+import { DevMidtransAdapter } from "./dev-midtrans.adapter.js";
+import { qrisDevMockEnabled } from "../payment-capabilities.js";
 
 export function createProviderAdapter(
   env: Env,
@@ -14,7 +16,10 @@ export function createProviderAdapter(
   const selected = provider ?? env.PAYMENT_PROVIDER;
   if (selected === "cash") return null;
   const resolvedRuntime = runtime ?? fallbackRuntimeFromEnv(env, selected);
-  if (selected === "midtrans") return new MidtransAdapter(env, resolvedRuntime);
+  if (selected === "midtrans") {
+    if (qrisDevMockEnabled(env)) return new DevMidtransAdapter();
+    return new MidtransAdapter(env, resolvedRuntime);
+  }
   if (selected === "xendit") return new XenditAdapter(env, resolvedRuntime);
   throw new Error(`Unknown payment provider: ${selected}`);
 }

@@ -38,6 +38,9 @@ npm run dev:web
 
 Login demo (after bootstrap): `cashier@demo.coffee` / `demo1234` — halaman **Kasir** di `/pos`.
 
+- **Bayar Tunai** works without Midtrans/Xendit keys.
+- **QRIS** in local `NODE_ENV=development` without `MIDTRANS_SERVER_KEY` uses a **dev mock** (pending QR + `POST /api/v1/dev/payments/:paymentId/simulate-success` to complete). For real sandbox QRIS, set `MIDTRANS_SERVER_KEY` in `.env`.
+
 ## Payment API (v1)
 
 - `POST /api/v1/payments` — buat pembayaran (amount dari order server-side)

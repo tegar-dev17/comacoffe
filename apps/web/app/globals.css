@@ -178,8 +178,13 @@ button {
   border-radius: 10px;
   border: 1px solid var(--border);
   background: var(--card);
+  color: var(--text);
   cursor: pointer;
   text-align: left;
+}
+
+.product-tile .muted {
+  color: var(--muted);
 }
 
 .cart-list {
@@ -212,6 +217,11 @@ button.secondary {
 
 .cart-total {
   font-size: 1.1rem;
+}
+
+.pos-hint {
+  font-size: 0.82rem;
+  line-height: 1.35;
 }
 
 .button-link {

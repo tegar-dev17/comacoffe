@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { Env } from "../config/env.js";
 import { mapPaymentDomainError } from "../modules/payment/payment-errors.js";
+import { resolvePosPaymentCapabilities } from "../modules/payment/payment-capabilities.js";
 import {
   PosForbiddenError,
   PosService,
@@ -31,6 +32,12 @@ function mapPosError(err: unknown) {
 
 export async function registerPosRoutes(app: FastifyInstance, env: Env) {
   const pos = new PosService(app.db, env);
+
+  app.get(
+    "/api/v1/pos/capabilities",
+    { preHandler: [app.authenticate] },
+    async () => ({ data: resolvePosPaymentCapabilities(env) }),
+  );
 
   app.post(
     "/api/v1/pos/checkout",

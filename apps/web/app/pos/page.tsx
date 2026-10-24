@@ -34,6 +34,12 @@ export default function PosPage() {
   const [lastReceipt, setLastReceipt] = useState<{ orderNumber: string; totalMinor: number } | null>(
     null,
   );
+  const [capabilities, setCapabilities] = useState<{
+    cash: boolean;
+    qris: boolean;
+    qrisDevMock?: boolean;
+    qrisHint?: string;
+  } | null>(null);
 
   const loadProducts = useCallback(async () => {
     if (!token || !outletId) return;
@@ -47,6 +53,16 @@ export default function PosPage() {
   useEffect(() => {
     void loadProducts().catch((e) => setError(e instanceof Error ? e.message : "Load failed"));
   }, [loadProducts]);
+
+  useEffect(() => {
+    if (!token) return;
+    apiFetch<{ data: { cash: boolean; qris: boolean; qrisDevMock?: boolean; qrisHint?: string } }>(
+      "/api/v1/pos/capabilities",
+      { token },
+    )
+      .then((res) => setCapabilities(res.data))
+      .catch(() => setCapabilities({ cash: true, qris: false, qrisHint: "Tidak dapat memuat konfigurasi QRIS." }));
+  }, [token]);
 
   const totalMinor = useMemo(
     () => cart.reduce((s, l) => s + l.priceMinor * l.quantity, 0),
@@ -172,6 +188,7 @@ export default function PosPage() {
         <p className="cart-total">
           Total: <strong>{formatIdr(totalMinor)}</strong>
         </p>
+        {capabilities?.qrisHint ? <p className="muted pos-hint">{capabilities.qrisHint}</p> : null}
         {error ? <p className="error">{error}</p> : null}
         {lastReceipt ? (
           <p className="success">
@@ -185,10 +202,11 @@ export default function PosPage() {
           <button
             type="button"
             className="secondary"
-            disabled={busy || cart.length === 0}
+            disabled={busy || cart.length === 0 || capabilities?.qris === false}
+            title={capabilities?.qris === false ? capabilities.qrisHint : undefined}
             onClick={() => void checkout("qris")}
           >
-            Bayar QRIS
+            {capabilities?.qrisDevMock ? "Bayar QRIS (dev mock)" : "Bayar QRIS"}
           </button>
         </div>
       </aside>

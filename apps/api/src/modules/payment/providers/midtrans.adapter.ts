@@ -51,7 +51,9 @@ export class MidtransAdapter implements PaymentProviderAdapter {
   private serverKey(): string {
     const key = this.runtime?.credentials.serverKey ?? this.env.MIDTRANS_SERVER_KEY;
     if (!key) {
-      throw new Error("Midtrans server key is not configured");
+      throw new ProviderCapabilityError(
+        "Midtrans server key is not configured — set MIDTRANS_SERVER_KEY or use Bayar Tunai",
+      );
     }
     return key;
   }
