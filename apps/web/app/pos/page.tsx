@@ -15,6 +15,13 @@ type Product = {
 
 type CartLine = { productId: string; name: string; priceMinor: number; quantity: number };
 
+function newIdempotencyKey(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `web-${crypto.randomUUID()}`;
+  }
+  return `web-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
 export default function PosPage() {
   const user = getStoredUser();
   const token = getToken();
@@ -83,7 +90,7 @@ export default function PosPage() {
           outletId,
           items: cart.map((l) => ({ productId: l.productId, quantity: l.quantity })),
           paymentMethod,
-          idempotencyKey: `web-${crypto.randomUUID()}`,
+          idempotencyKey: newIdempotencyKey(),
         }),
       });
       setLastReceipt({

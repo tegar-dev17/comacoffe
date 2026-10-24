@@ -3,13 +3,7 @@ import { z } from "zod";
 import type { Env } from "../config/env.js";
 import { PaymentService } from "../modules/payment/services/payment.service.js";
 import { RefundService } from "../modules/payment/services/refund.service.js";
-import {
-  PaymentConflictError,
-  PaymentForbiddenError,
-  PaymentNotFoundError,
-  PaymentValidationError,
-} from "../modules/payment/services/payment.service.js";
-import { ProviderCapabilityError } from "../modules/payment/providers/midtrans.adapter.js";
+import { mapPaymentDomainError } from "../modules/payment/payment-errors.js";
 
 const createPaymentSchema = z.object({
   orderId: z.string().uuid(),
@@ -27,11 +21,8 @@ const refundSchema = z.object({
 });
 
 function handlePaymentError(err: unknown) {
-  if (err instanceof PaymentNotFoundError) return { status: 404, body: { error: err.message } };
-  if (err instanceof PaymentForbiddenError) return { status: 403, body: { error: err.message } };
-  if (err instanceof PaymentValidationError) return { status: 400, body: { error: err.message } };
-  if (err instanceof PaymentConflictError) return { status: 409, body: { error: err.message } };
-  if (err instanceof ProviderCapabilityError) return { status: 422, body: { error: err.message } };
+  const mapped = mapPaymentDomainError(err);
+  if (mapped) return mapped;
   return { status: 500, body: { error: "Internal server error" } };
 }
 

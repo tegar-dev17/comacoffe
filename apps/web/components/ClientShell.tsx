@@ -9,11 +9,17 @@ export function ClientShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const [user, setUser] = useState<StoredUser | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
   const isLogin = pathname === "/login";
 
   useEffect(() => {
     setUser(getStoredUser());
-  }, [pathname]);
+    const token = getToken();
+    setAuthChecked(true);
+    if (!token && pathname !== "/login") {
+      router.replace("/login");
+    }
+  }, [pathname, router]);
 
   function logout() {
     clearSession();
@@ -25,11 +31,12 @@ export function ClientShell({ children }: { children: React.ReactNode }) {
     return <>{children}</>;
   }
 
-  const token = getToken();
-  if (!token && !isLogin) {
-    if (typeof window !== "undefined" && pathname !== "/login") {
-      router.replace("/login");
-    }
+  if (!authChecked) {
+    return <main className="container muted">Memuat…</main>;
+  }
+
+  if (!getToken()) {
+    return <main className="container muted">Mengalihkan ke login…</main>;
   }
 
   return (

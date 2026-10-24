@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { Env } from "../config/env.js";
+import { mapPaymentDomainError } from "../modules/payment/payment-errors.js";
 import {
   PosForbiddenError,
   PosService,
@@ -43,10 +44,11 @@ export async function registerPosRoutes(app: FastifyInstance, env: Env) {
         const result = await pos.checkout(request.auth!, parsed.data);
         return reply.status(201).send({ data: result });
       } catch (err) {
-        const mapped = mapPosError(err);
+        const mapped = mapPosError(err) ?? mapPaymentDomainError(err);
         if (mapped) return reply.status(mapped.status).send(mapped.body);
         request.log.error({ err }, "pos checkout failed");
-        return reply.status(500).send({ error: "Internal server error" });
+        const message = err instanceof Error ? err.message : "Internal server error";
+        return reply.status(500).send({ error: message });
       }
     },
   );

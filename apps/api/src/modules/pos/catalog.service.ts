@@ -132,6 +132,18 @@ export class CatalogService {
         trackInventory: input.trackInventory ?? true,
       })
       .returning();
+
+    const outlets = await this.db.query.outlets.findMany({
+      where: eq(schema.outlets.tenantId, auth.tenantId),
+    });
+    for (const outlet of outlets) {
+      await this.db.insert(schema.outletProductStock).values({
+        outletId: outlet.id,
+        productId: created!.id,
+        quantityOnHand: 0,
+      });
+    }
+
     return created!;
   }
 

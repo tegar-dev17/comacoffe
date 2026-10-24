@@ -3,10 +3,21 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001"
 async function parseJson(res: Response) {
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const message =
-      typeof body.error === "string"
-        ? body.error
-        : body.error?.message ?? `Request failed (${res.status})`;
+    let message = `Request failed (${res.status})`;
+    if (typeof body.error === "string") {
+      message = body.error;
+    } else if (body.error && typeof body.error === "object") {
+      const flat = body.error as {
+        formErrors?: string[];
+        fieldErrors?: Record<string, string[]>;
+      };
+      const fieldMsg = flat.fieldErrors
+        ? Object.values(flat.fieldErrors).flat().find(Boolean)
+        : undefined;
+      message = flat.formErrors?.[0] ?? fieldMsg ?? message;
+    } else if (body.error?.message) {
+      message = body.error.message;
+    }
     throw new Error(message);
   }
   return body;
