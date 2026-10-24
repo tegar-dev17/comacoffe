@@ -21,6 +21,8 @@ export interface CreatePaymentInput {
   provider?: PaymentProvider;
   localOperationId?: string;
   deviceId?: string;
+  cashAmountReceivedMinor?: number;
+  discountMinor?: number;
 }
 
 export interface PaymentInstructions {
@@ -29,6 +31,9 @@ export interface PaymentInstructions {
   qrString?: string;
   expiresAt?: string;
   message?: string;
+  cashAmountReceivedMinor?: number;
+  changeMinor?: number;
+  stagingFallback?: boolean;
 }
 
 export interface ProviderCreatePaymentResult {

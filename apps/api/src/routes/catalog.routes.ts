@@ -5,13 +5,18 @@ import {
   CatalogService,
   CatalogValidationError,
 } from "../modules/pos/catalog.service.js";
-import { adjustOutletStock, InventoryError } from "../modules/pos/inventory.service.js";
+import {
+  adjustOutletStock,
+  InventoryError,
+  listInventoryMovements,
+} from "../modules/pos/inventory.service.js";
 import { PERMISSIONS, roleHasPermission } from "../modules/auth/permissions.js";
 
 const productSchema = z.object({
   id: z.string().uuid().optional(),
   name: z.string().min(2).max(120),
   sku: z.string().max(64).nullable().optional(),
+  barcode: z.string().max(64).nullable().optional(),
   priceMinor: z.number().int().positive(),
   categoryId: z.string().uuid().nullable().optional(),
   isActive: z.boolean().optional(),
@@ -39,7 +44,13 @@ export async function registerCatalogRoutes(app: FastifyInstance) {
     "/api/v1/catalog/products",
     { preHandler: [app.authenticate] },
     async (request, reply) => {
-      const qs = request.query as { outletId?: string; q?: string; admin?: string };
+      const qs = request.query as {
+        outletId?: string;
+        q?: string;
+        admin?: string;
+        categoryId?: string;
+        barcode?: string;
+      };
       try {
         if (qs.admin === "1") {
           if (!roleHasPermission(request.auth!.role, PERMISSIONS.PRODUCT_MANAGE)) {
@@ -62,7 +73,13 @@ export async function registerCatalogRoutes(app: FastifyInstance) {
         if (!qs.outletId) {
           return reply.status(400).send({ error: "outletId required" });
         }
-        const rows = await catalog.listProductsForPos(request.auth!, qs.outletId, qs.q);
+        const rows = await catalog.listProductsForPos(
+          request.auth!,
+          qs.outletId,
+          qs.q,
+          qs.categoryId,
+          qs.barcode,
+        );
         return { data: rows };
       } catch (err) {
         const mapped = mapCatalogError(err);
@@ -92,6 +109,28 @@ export async function registerCatalogRoutes(app: FastifyInstance) {
             trackInventory: row.trackInventory,
           },
         });
+      } catch (err) {
+        const mapped = mapCatalogError(err);
+        if (mapped) return reply.status(mapped.status).send(mapped.body);
+        throw err;
+      }
+    },
+  );
+
+  app.post(
+    "/api/v1/catalog/categories",
+    { preHandler: [app.authenticate] },
+    async (request, reply) => {
+      const bodySchema = z.object({
+        id: z.string().uuid().optional(),
+        name: z.string().min(2).max(80),
+        sortOrder: z.number().int().optional(),
+      });
+      const parsed = bodySchema.safeParse(request.body);
+      if (!parsed.success) return reply.status(400).send({ error: parsed.error.flatten() });
+      try {
+        const row = await catalog.upsertCategory(request.auth!, parsed.data);
+        return reply.status(parsed.data.id ? 200 : 201).send({ data: row });
       } catch (err) {
         const mapped = mapCatalogError(err);
         if (mapped) return reply.status(mapped.status).send(mapped.body);
@@ -141,6 +180,36 @@ export async function registerCatalogRoutes(app: FastifyInstance) {
         if (mapped) return reply.status(mapped.status).send(mapped.body);
         throw err;
       }
+    },
+  );
+
+  app.get(
+    "/api/v1/catalog/inventory/movements",
+    { preHandler: [app.authenticate] },
+    async (request, reply) => {
+      if (!roleHasPermission(request.auth!.role, PERMISSIONS.INVENTORY_MANAGE)) {
+        return reply.status(403).send({ error: "Insufficient permission" });
+      }
+      const qs = request.query as { outletId?: string; productId?: string; limit?: string };
+      const rows = await listInventoryMovements(app.db, {
+        tenantId: request.auth!.tenantId,
+        outletId: qs.outletId,
+        productId: qs.productId,
+        limit: qs.limit ? Number(qs.limit) : 50,
+      });
+      return {
+        data: rows.map((r) => ({
+          id: r.id,
+          outletId: r.outletId,
+          productId: r.productId,
+          delta: r.delta,
+          reason: r.reason,
+          referenceType: r.referenceType,
+          referenceId: r.referenceId,
+          actorUserId: r.actorUserId,
+          createdAt: r.createdAt.toISOString(),
+        })),
+      };
     },
   );
 

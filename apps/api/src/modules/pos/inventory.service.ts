@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import * as schema from "../../db/schema/index.js";
 
@@ -162,5 +162,26 @@ export async function adjustOutletStock(
     });
 
     return { quantityOnHand: nextQty };
+  });
+}
+
+export async function listInventoryMovements(
+  db: Db,
+  params: {
+    tenantId: string;
+    outletId?: string;
+    productId?: string;
+    limit?: number;
+  },
+) {
+  const conditions = [eq(schema.inventoryMovements.tenantId, params.tenantId)];
+  if (params.outletId) conditions.push(eq(schema.inventoryMovements.outletId, params.outletId));
+  if (params.productId) conditions.push(eq(schema.inventoryMovements.productId, params.productId));
+
+  const limit = Math.min(200, Math.max(1, params.limit ?? 50));
+  return db.query.inventoryMovements.findMany({
+    where: and(...conditions),
+    orderBy: desc(schema.inventoryMovements.createdAt),
+    limit,
   });
 }

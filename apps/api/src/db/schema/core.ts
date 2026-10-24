@@ -4,6 +4,7 @@ import {
   text,
   timestamp,
   bigint,
+  boolean,
   index,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
@@ -46,6 +47,7 @@ export const users = pgTable(
     displayName: text("display_name").notNull(),
     role: text("role").notNull(),
     passwordHash: text("password_hash"),
+    isActive: boolean("is_active").notNull().default(true),
     outletId: uuid("outlet_id").references(() => outlets.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

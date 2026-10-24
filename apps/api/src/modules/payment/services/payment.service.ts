@@ -178,7 +178,11 @@ export class PaymentService {
     let attemptError: string | undefined;
     try {
       if (provider === "cash") {
-        providerResult = createCashPaymentResult({ paymentId, amountMinor: order.totalMinor });
+        providerResult = createCashPaymentResult({
+          paymentId,
+          amountMinor: order.totalMinor,
+          cashAmountReceivedMinor: input.cashAmountReceivedMinor,
+        });
       } else {
         const merchantConfigs = new MerchantConfigService(this.db, this.env);
         const runtime = await merchantConfigs.resolveRuntimeConfig({

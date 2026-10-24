@@ -22,6 +22,8 @@ const checkoutSchema = z.object({
   provider: z.enum(["midtrans", "xendit"]).optional(),
   localOperationId: z.string().uuid().optional(),
   deviceId: z.string().max(128).optional(),
+  cashAmountReceivedMinor: z.number().int().nonnegative().optional(),
+  discountMinor: z.number().int().nonnegative().optional(),
 });
 
 function mapPosError(err: unknown) {

@@ -14,6 +14,9 @@ export const PERMISSIONS = {
   PRODUCT_MANAGE: "product.manage",
   INVENTORY_MANAGE: "inventory.manage",
   REPORT_READ: "report.read",
+  SETTINGS_MANAGE: "settings.manage",
+  STAFF_MANAGE: "staff.manage",
+  SHIFT_MANAGE: "shift.manage",
 } as const;
 
 export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
@@ -36,6 +39,9 @@ const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     PERMISSIONS.PRODUCT_MANAGE,
     PERMISSIONS.INVENTORY_MANAGE,
     PERMISSIONS.REPORT_READ,
+    PERMISSIONS.SETTINGS_MANAGE,
+    PERMISSIONS.STAFF_MANAGE,
+    PERMISSIONS.SHIFT_MANAGE,
   ],
   cashier: [
     PERMISSIONS.PAYMENT_READ,
@@ -44,6 +50,7 @@ const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     PERMISSIONS.ORDER_READ,
     PERMISSIONS.POS_CHECKOUT,
     PERMISSIONS.PRODUCT_READ,
+    PERMISSIONS.SHIFT_MANAGE,
   ],
 };
 

@@ -7,6 +7,7 @@ import { verifyPassword } from "../modules/auth/password.js";
 const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(6).max(128),
+  tenantSlug: z.string().min(2).max(64).optional(),
 });
 
 export async function registerAuthRoutes(app: FastifyInstance) {
@@ -17,10 +18,24 @@ export async function registerAuthRoutes(app: FastifyInstance) {
     }
 
     const email = parsed.data.email.toLowerCase();
-    const user = await app.db.query.users.findFirst({
-      where: eq(schema.users.email, email),
-    });
-    if (!user || !verifyPassword(parsed.data.password, user.passwordHash)) {
+    let tenantId: string | undefined;
+    if (parsed.data.tenantSlug) {
+      const tenant = await app.db.query.tenants.findFirst({
+        where: eq(schema.tenants.slug, parsed.data.tenantSlug),
+      });
+      if (!tenant) return reply.status(401).send({ error: "Invalid email or password" });
+      tenantId = tenant.id;
+    }
+
+    const user = tenantId
+      ? await app.db.query.users.findFirst({
+          where: and(eq(schema.users.email, email), eq(schema.users.tenantId, tenantId)),
+        })
+      : await app.db.query.users.findFirst({
+          where: eq(schema.users.email, email),
+        });
+
+    if (!user || !user.isActive || !verifyPassword(parsed.data.password, user.passwordHash)) {
       return reply.status(401).send({ error: "Invalid email or password" });
     }
 

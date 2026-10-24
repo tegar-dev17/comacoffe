@@ -48,6 +48,11 @@ export function ClientShell({ children }: { children: React.ReactNode }) {
           <Link href="/pos">Kasir</Link>
           <Link href="/orders">Transaksi</Link>
           <Link href="/products">Produk</Link>
+          <Link href="/inventory">Inventori</Link>
+          <Link href="/reports">Laporan</Link>
+          <Link href="/shifts">Shift</Link>
+          <Link href="/staff">Staf</Link>
+          <Link href="/settings">Pengaturan</Link>
           <Link href="/payments">Payments</Link>
           {user ? (
             <button type="button" className="link-btn" onClick={logout}>

@@ -42,6 +42,7 @@ export const products = pgTable(
     }),
     name: text("name").notNull(),
     sku: text("sku"),
+    barcode: text("barcode"),
     priceMinor: bigint("price_minor", { mode: "number" }).notNull(),
     currency: text("currency").notNull().default("IDR"),
     isActive: boolean("is_active").notNull().default(true),

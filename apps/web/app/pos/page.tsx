@@ -11,7 +11,10 @@ type Product = {
   priceMinor: number;
   quantityOnHand: number;
   trackInventory: boolean;
+  categoryId?: string | null;
 };
+
+type Category = { id: string; name: string };
 
 type CartLine = { productId: string; name: string; priceMinor: number; quantity: number };
 
@@ -28,7 +31,11 @@ export default function PosPage() {
   const outletId = user?.outletId ?? "";
   const [products, setProducts] = useState<Product[]>([]);
   const [query, setQuery] = useState("");
+  const [barcode, setBarcode] = useState("");
+  const [categoryId, setCategoryId] = useState("");
+  const [categories, setCategories] = useState<Category[]>([]);
   const [cart, setCart] = useState<CartLine[]>([]);
+  const [cashReceived, setCashReceived] = useState<number | "">("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [lastReceipt, setLastReceipt] = useState<{ orderNumber: string; totalMinor: number } | null>(
@@ -43,16 +50,38 @@ export default function PosPage() {
 
   const loadProducts = useCallback(async () => {
     if (!token || !outletId) return;
+    const params = new URLSearchParams({ outletId });
+    if (query.trim()) params.set("q", query.trim());
+    if (categoryId) params.set("categoryId", categoryId);
     const res = await apiFetch<{ data: Product[] }>(
-      `/api/v1/catalog/products?outletId=${outletId}&q=${encodeURIComponent(query)}`,
+      `/api/v1/catalog/products?${params.toString()}`,
       { token },
     );
     setProducts(res.data);
-  }, [token, outletId, query]);
+  }, [token, outletId, query, categoryId]);
+
+  async function lookupBarcode() {
+    if (!token || !outletId || !barcode.trim()) return;
+    const params = new URLSearchParams({ outletId, barcode: barcode.trim() });
+    const res = await apiFetch<{ data: Product[] }>(
+      `/api/v1/catalog/products?${params.toString()}`,
+      { token },
+    );
+    if (res.data[0]) addToCart(res.data[0]);
+    else setError("Produk barcode tidak ditemukan");
+    setBarcode("");
+  }
 
   useEffect(() => {
     void loadProducts().catch((e) => setError(e instanceof Error ? e.message : "Load failed"));
   }, [loadProducts]);
+
+  useEffect(() => {
+    if (!token) return;
+    apiFetch<{ data: Category[] }>("/api/v1/catalog/categories", { token })
+      .then((r) => setCategories(r.data))
+      .catch(() => undefined);
+  }, [token]);
 
   useEffect(() => {
     if (!token) return;
@@ -91,13 +120,27 @@ export default function PosPage() {
 
   async function checkout(paymentMethod: "cash" | "qris") {
     if (!token || !outletId || cart.length === 0) return;
+    let receivedMinor: number | undefined;
+    if (paymentMethod === "cash") {
+      const parsed =
+        cashReceived === "" ? totalMinor : Number(cashReceived);
+      if (!Number.isFinite(parsed) || parsed < totalMinor) {
+        setError("Nominal tunai diterima harus ≥ total");
+        return;
+      }
+      receivedMinor = parsed;
+    }
     setBusy(true);
     setError(null);
     try {
       const res = await apiFetch<{
         data: {
           order: { id: string; orderNumber: string; totalMinor: number };
-          payment: { id: string; status: string; instructions?: unknown };
+          payment: {
+            id: string;
+            status: string;
+            instructions?: { changeMinor?: number; cashAmountReceivedMinor?: number };
+          };
         };
       }>("/api/v1/pos/checkout", {
         method: "POST",
@@ -107,13 +150,20 @@ export default function PosPage() {
           items: cart.map((l) => ({ productId: l.productId, quantity: l.quantity })),
           paymentMethod,
           idempotencyKey: newIdempotencyKey(),
+          cashAmountReceivedMinor: receivedMinor,
         }),
       });
+      const change = res.data.payment.instructions?.changeMinor;
       setLastReceipt({
         orderNumber: res.data.order.orderNumber,
         totalMinor: res.data.order.totalMinor,
       });
+      if (paymentMethod === "cash" && change != null && change > 0) {
+        setError(null);
+        alert(`Kembalian: ${formatIdr(change)}`);
+      }
       setCart([]);
+      setCashReceived("");
       await loadProducts();
       if (paymentMethod === "qris") {
         window.location.href = `/payments/${res.data.payment.id}`;
@@ -142,6 +192,22 @@ export default function PosPage() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
+          <input
+            placeholder="Scan barcode…"
+            value={barcode}
+            onChange={(e) => setBarcode(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void lookupBarcode();
+            }}
+          />
+          <select value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
+            <option value="">Semua kategori</option>
+            {categories.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
           <button type="button" onClick={() => void loadProducts()}>
             Refresh
           </button>
@@ -186,8 +252,22 @@ export default function PosPage() {
           ))}
         </ul>
         <p className="cart-total">
-          Total: <strong>{formatIdr(totalMinor)}</strong>
+          Subtotal: <strong>{formatIdr(totalMinor)}</strong>
         </p>
+        <label>
+          Tunai diterima (kosongkan = pas)
+          <input
+            type="number"
+            min={0}
+            value={cashReceived}
+            onChange={(e) =>
+              setCashReceived(e.target.value === "" ? "" : Number(e.target.value))
+            }
+          />
+        </label>
+        <button type="button" className="secondary" disabled={cart.length === 0} onClick={() => setCart([])}>
+          Kosongkan keranjang
+        </button>
         {capabilities?.qrisHint ? <p className="muted pos-hint">{capabilities.qrisHint}</p> : null}
         {error ? <p className="error">{error}</p> : null}
         {lastReceipt ? (

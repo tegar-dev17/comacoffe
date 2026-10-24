@@ -29,7 +29,13 @@ export class CatalogService {
     }
   }
 
-  async listProductsForPos(auth: AuthContext, outletId: string, q?: string) {
+  async listProductsForPos(
+    auth: AuthContext,
+    outletId: string,
+    q?: string,
+    categoryId?: string,
+    barcode?: string,
+  ) {
     this.assertPermission(auth, PERMISSIONS.PRODUCT_READ);
     if (auth.outletId && auth.role === "cashier" && outletId !== auth.outletId) {
       throw new CatalogForbiddenError("Outlet access denied");
@@ -39,9 +45,20 @@ export class CatalogService {
       eq(schema.products.tenantId, auth.tenantId),
       eq(schema.products.isActive, true),
     ];
-    if (q?.trim()) {
+    if (categoryId) {
+      conditions.push(eq(schema.products.categoryId, categoryId));
+    }
+    if (barcode?.trim()) {
+      conditions.push(eq(schema.products.barcode, barcode.trim()));
+    } else if (q?.trim()) {
       const term = `%${q.trim()}%`;
-      conditions.push(or(ilike(schema.products.name, term), ilike(schema.products.sku, term))!);
+      conditions.push(
+        or(
+          ilike(schema.products.name, term),
+          ilike(schema.products.sku, term),
+          ilike(schema.products.barcode, term),
+        )!,
+      );
     }
 
     const rows = await this.db
@@ -92,6 +109,7 @@ export class CatalogService {
       id?: string;
       name: string;
       sku?: string | null;
+      barcode?: string | null;
       priceMinor: number;
       categoryId?: string | null;
       isActive?: boolean;
@@ -108,6 +126,7 @@ export class CatalogService {
         .set({
           name: input.name,
           sku: input.sku ?? null,
+          barcode: input.barcode ?? null,
           priceMinor: input.priceMinor,
           categoryId: input.categoryId ?? null,
           isActive: input.isActive ?? true,
@@ -126,6 +145,7 @@ export class CatalogService {
         tenantId: auth.tenantId,
         name: input.name,
         sku: input.sku ?? null,
+        barcode: input.barcode ?? null,
         priceMinor: input.priceMinor,
         categoryId: input.categoryId ?? null,
         isActive: input.isActive ?? true,

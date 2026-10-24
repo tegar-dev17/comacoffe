@@ -19,6 +19,9 @@ import { registerAuthRoutes } from "./routes/auth.routes.js";
 import { registerPosRoutes } from "./routes/pos.routes.js";
 import { registerCatalogRoutes } from "./routes/catalog.routes.js";
 import { registerReportRoutes } from "./routes/reports.routes.js";
+import { registerSettingsRoutes } from "./routes/settings.routes.js";
+import { registerStaffRoutes } from "./routes/staff.routes.js";
+import { registerShiftRoutes } from "./routes/shifts.routes.js";
 import { registerPublicRoutes } from "./routes/public.routes.js";
 import { startOutboxWorker } from "./jobs/outbox.worker.js";
 import { startReconciliationScheduler } from "./jobs/reconciliation.worker.js";
@@ -54,6 +57,9 @@ async function main() {
   await registerPosRoutes(app, env);
   await registerCatalogRoutes(app);
   await registerReportRoutes(app);
+  await registerSettingsRoutes(app, env);
+  await registerStaffRoutes(app);
+  await registerShiftRoutes(app);
   await registerReconciliationRoutes(app, env);
   await registerDevRoutes(app, env);
 

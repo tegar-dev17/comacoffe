@@ -6,6 +6,8 @@ import * as schema from "../../db/schema/index.js";
 import type { AuthContext } from "../auth/types.js";
 import { PERMISSIONS, roleHasPermission } from "../auth/permissions.js";
 import { PaymentService } from "../payment/services/payment.service.js";
+import { SettingsService } from "../settings/settings.service.js";
+import { ShiftService } from "../shifts/shift.service.js";
 
 type Db = NodePgDatabase<typeof schema>;
 
@@ -56,6 +58,8 @@ export class PosService {
       provider?: "midtrans" | "xendit";
       localOperationId?: string;
       deviceId?: string;
+      cashAmountReceivedMinor?: number;
+      discountMinor?: number;
     },
   ) {
     this.assertPermission(auth, PERMISSIONS.POS_CHECKOUT);
@@ -108,8 +112,34 @@ export class PosService {
       });
     }
 
-    const totalMinor = normalizedLines.reduce((sum, l) => sum + l.lineTotalMinor, 0);
+    const subtotalMinor = normalizedLines.reduce((sum, l) => sum + l.lineTotalMinor, 0);
+    const discountMinor = Math.max(0, input.discountMinor ?? 0);
+    if (discountMinor > subtotalMinor) {
+      throw new PosValidationError("Discount cannot exceed subtotal");
+    }
+    const settingsSvc = new SettingsService(this.db);
+    const settings = await settingsSvc.getSettingsForTenant(auth.tenantId);
+    const taxBps = settings?.taxRateBps ?? 0;
+    const serviceBps = settings?.serviceChargeBps ?? 0;
+    const taxableBase = subtotalMinor - discountMinor;
+    const taxMinor = Math.round((taxableBase * taxBps) / 10_000);
+    const serviceMinor = Math.round((taxableBase * serviceBps) / 10_000);
+    const totalMinor = taxableBase + taxMinor + serviceMinor;
     if (totalMinor <= 0) throw new PosValidationError("Invalid order total");
+
+    if (settings?.requireOpenShift) {
+      const shiftSvc = new ShiftService(this.db);
+      const open = await shiftSvc.getOpenShift(auth, outletId);
+      if (!open) {
+        throw new PosValidationError("Buka shift kasir terlebih dahulu (Pengaturan → Shift)");
+      }
+    }
+
+    if (input.paymentMethod === "cash" && input.cashAmountReceivedMinor !== undefined) {
+      if (input.cashAmountReceivedMinor < totalMinor) {
+        throw new PosValidationError("Nominal tunai diterima kurang dari total");
+      }
+    }
 
     const orderNumber = `POS-${Date.now().toString(36).toUpperCase()}-${uuidv4().slice(0, 6)}`;
 
@@ -171,12 +201,23 @@ export class PosService {
       provider: input.provider,
       localOperationId: input.localOperationId,
       deviceId: input.deviceId,
+      cashAmountReceivedMinor: input.cashAmountReceivedMinor,
+      discountMinor,
     });
+
+    const paymentRow = payment as { status?: string };
+    if (input.paymentMethod === "cash" && paymentRow.status === "SUCCEEDED") {
+      await new ShiftService(this.db).recordCashSaleIfOpen(auth, outletId, orderId, totalMinor);
+    }
 
     return {
       order: {
         id: orderId,
         orderNumber,
+        subtotalMinor,
+        discountMinor,
+        taxMinor,
+        serviceChargeMinor: serviceMinor,
         totalMinor,
         currency: "IDR",
       },
