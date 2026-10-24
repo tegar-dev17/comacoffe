@@ -5,7 +5,14 @@ import { WebhookService } from "../modules/payment/services/webhook.service.js";
 export async function registerWebhookRoutes(app: FastifyInstance, env: Env) {
   const webhookService = new WebhookService(app.db, env);
 
-  app.post("/api/v1/webhooks/midtrans/notification", async (request, reply) => {
+  const webhookRateLimit = {
+    rateLimit: {
+      max: env.WEBHOOK_RATE_LIMIT_PER_MINUTE,
+      timeWindow: "1 minute" as const,
+    },
+  };
+
+  app.post("/api/v1/webhooks/midtrans/notification", { config: webhookRateLimit }, async (request, reply) => {
     try {
       const result = await webhookService.handleWebhook(
         "midtrans",
@@ -22,7 +29,7 @@ export async function registerWebhookRoutes(app: FastifyInstance, env: Env) {
     }
   });
 
-  app.post("/api/v1/webhooks/xendit/qris", async (request, reply) => {
+  app.post("/api/v1/webhooks/xendit/qris", { config: webhookRateLimit }, async (request, reply) => {
     try {
       const result = await webhookService.handleWebhook(
         "xendit",

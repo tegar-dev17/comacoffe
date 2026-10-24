@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { formatIdr } from "@/lib/api";
+import { formatDateTimeId, formatIdr } from "@/lib/format";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
 
@@ -95,8 +95,8 @@ export default function PaymentDetailPage() {
               <strong>Nominal:</strong> {formatIdr(detail.payment.amountMinor)}
             </p>
             <p className="muted">
-              Dibuat {new Date(detail.payment.createdAt).toLocaleString("id-ID")} · Diperbarui{" "}
-              {new Date(detail.payment.updatedAt).toLocaleString("id-ID")}
+              Dibuat {formatDateTimeId(detail.payment.createdAt)} · Diperbarui{" "}
+              {formatDateTimeId(detail.payment.updatedAt)}
             </p>
           </div>
           <div className="card">
@@ -119,7 +119,7 @@ export default function PaymentDetailPage() {
                       <td>{e.fromStatus ?? "—"}</td>
                       <td>{e.toStatus}</td>
                       <td>{e.source}</td>
-                      <td>{new Date(e.createdAt).toLocaleString("id-ID")}</td>
+                      <td>{formatDateTimeId(e.createdAt)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -161,7 +161,7 @@ export default function PaymentDetailPage() {
               <ul>
                 {detail.reconciliations.map((r) => (
                   <li key={r.id}>
-                    {r.status} — {r.notes ?? r.providerStatus} ({new Date(r.createdAt).toLocaleString("id-ID")})
+                    {r.status} — {r.notes ?? r.providerStatus} ({formatDateTimeId(r.createdAt)})
                   </li>
                 ))}
               </ul>
