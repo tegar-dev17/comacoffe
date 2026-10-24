@@ -114,6 +114,10 @@ Idempotency keys are unchanged: repeating `POST /api/v1/payments` with the same 
 
 A partial unique index (`payments_one_active_per_order_uidx`) enforces at most one in-flight payment per order at the database level.
 
+## Deploy (Render)
+
+Blueprint and step-by-step guide: [`docs/DEPLOY-RENDER.md`](docs/DEPLOY-RENDER.md) and [`render.yaml`](render.yaml).
+
 ## CI (GitHub Actions)
 
 Workflow: [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
