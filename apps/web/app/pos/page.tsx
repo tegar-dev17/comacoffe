@@ -115,7 +115,7 @@ export default function PosPage() {
       });
       setCart([]);
       await loadProducts();
-      if (paymentMethod === "qris" && res.data.payment.status !== "SUCCEEDED") {
+      if (paymentMethod === "qris") {
         window.location.href = `/payments/${res.data.payment.id}`;
       }
     } catch (e) {

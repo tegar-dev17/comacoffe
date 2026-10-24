@@ -234,6 +234,23 @@ button.secondary {
   text-decoration: none;
 }
 
+.qris-panel {
+  text-align: center;
+}
+
+.qris-image {
+  max-width: min(280px, 90vw);
+  margin: 1rem auto;
+  display: block;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.status-pending {
+  color: #92400e;
+  font-weight: 600;
+}
+
 @media print {
   .topbar,
   button {

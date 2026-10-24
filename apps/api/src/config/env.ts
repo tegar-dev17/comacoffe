@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { validateMidtransEnvironmentConfig } from "../modules/payment/providers/midtrans-env.js";
 
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
@@ -8,10 +9,16 @@ const envSchema = z.object({
   JWT_SECRET: z.string().min(32),
   PAYMENT_PROVIDER: z.enum(["midtrans", "xendit"]).default("midtrans"),
   PAYMENT_ENV: z.enum(["sandbox", "production"]).default("sandbox"),
+  /** Midtrans-specific environment; overrides PAYMENT_ENV for Midtrans API base URL when set. */
+  MIDTRANS_ENVIRONMENT: z.enum(["sandbox", "production"]).optional(),
   MIDTRANS_SERVER_KEY: z.string().optional(),
   MIDTRANS_CLIENT_KEY: z.string().optional(),
   MIDTRANS_MERCHANT_ID: z.string().optional(),
-  MIDTRANS_API_BASE_URL: z.string().url().default("https://api.sandbox.midtrans.com"),
+  MIDTRANS_API_BASE_URL: z.string().url().optional(),
+  /** Dashboard Notification URL should match this path on API_BASE_URL (informational). */
+  MIDTRANS_NOTIFICATION_URL: z.string().url().optional(),
+  /** QRIS acquirer on Core API charge (e.g. gopay). Must be activated for the merchant. */
+  MIDTRANS_QRIS_ACQUIRER: z.string().min(2).max(32).default("gopay"),
   XENDIT_SECRET_KEY: z.string().optional(),
   XENDIT_WEBHOOK_TOKEN: z.string().optional(),
   XENDIT_API_BASE_URL: z.string().url().default("https://api.xendit.co"),
@@ -50,8 +57,9 @@ export function resetEnvCacheForTests(): void {
 }
 
 export function validatePaymentProviderConfig(env: Env): void {
-  if (env.PAYMENT_PROVIDER === "midtrans" && !env.MIDTRANS_SERVER_KEY) {
-    if (env.NODE_ENV === "production") {
+  if (env.PAYMENT_PROVIDER === "midtrans") {
+    validateMidtransEnvironmentConfig(env);
+    if (!env.MIDTRANS_SERVER_KEY && env.NODE_ENV === "production") {
       throw new Error("MIDTRANS_SERVER_KEY is required when PAYMENT_PROVIDER=midtrans in production");
     }
   }

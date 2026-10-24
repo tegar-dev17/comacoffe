@@ -24,6 +24,7 @@ const baseEnv = {
   OUTBOX_INTERVAL_MS: 5000,
   OUTBOX_MAX_ATTEMPTS: 8,
   ENABLE_RLS: false,
+  MIDTRANS_QRIS_ACQUIRER: "gopay",
 } satisfies Env;
 
 describe("runtime security", () => {

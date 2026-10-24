@@ -183,6 +183,9 @@ export class PaymentService {
         });
         const adapter = createProviderAdapter(this.env, provider, runtime);
         if (!adapter) throw new Error("Provider adapter missing");
+        const orderLines = await this.db.query.orderItems.findMany({
+          where: eq(schema.orderItems.orderId, order.id),
+        });
         providerResult = await adapter.createPayment({
           paymentId,
           orderId: order.id,
@@ -190,6 +193,12 @@ export class PaymentService {
           amountMinor: order.totalMinor,
           currency: order.currency,
           paymentMethod: input.paymentMethod,
+          lineItems: orderLines.map((line) => ({
+            id: line.productId ?? line.id,
+            name: line.productName,
+            priceMinor: line.unitPriceMinor,
+            quantity: line.quantity,
+          })),
         });
       }
     } catch (err) {
@@ -481,8 +490,11 @@ export class PaymentService {
       where: eq(schema.paymentAttempts.paymentId, paymentId),
     });
 
+    const instructions = (payment.metadataJson as { instructions?: import("../types.js").PaymentInstructions })
+      ?.instructions;
+
     return {
-      payment: this.toPublicPayment(payment),
+      payment: this.toPublicPayment(payment, instructions),
       statusHistory: events.map((e) => ({
         id: e.id,
         fromStatus: e.fromStatus,
