@@ -1,24 +1,44 @@
 import { z } from "zod";
+import { validateMidtransEnvironmentConfig } from "../modules/payment/providers/midtrans-env.js";
 
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().default(3001),
-  API_BASE_URL: z.string().url().default("http://localhost:3001"),
+  API_BASE_URL: z.preprocess(
+    (val) => val ?? process.env.RENDER_EXTERNAL_URL ?? undefined,
+    z.string().url().default("http://localhost:3001"),
+  ),
+  /** Comma-separated browser origins allowed to call the API (production). */
+  CORS_ORIGINS: z.string().optional(),
+  /** Primary frontend origin (used for CORS when CORS_ORIGINS is unset). */
+  FRONTEND_URL: z.string().url().optional(),
   DATABASE_URL: z.string().min(1),
   JWT_SECRET: z.string().min(32),
   PAYMENT_PROVIDER: z.enum(["midtrans", "xendit"]).default("midtrans"),
   PAYMENT_ENV: z.enum(["sandbox", "production"]).default("sandbox"),
+  /** Midtrans-specific environment; overrides PAYMENT_ENV for Midtrans API base URL when set. */
+  MIDTRANS_ENVIRONMENT: z.enum(["sandbox", "production"]).optional(),
   MIDTRANS_SERVER_KEY: z.string().optional(),
   MIDTRANS_CLIENT_KEY: z.string().optional(),
   MIDTRANS_MERCHANT_ID: z.string().optional(),
-  MIDTRANS_API_BASE_URL: z.string().url().default("https://api.sandbox.midtrans.com"),
+  MIDTRANS_API_BASE_URL: z.string().url().optional(),
+  /** Dashboard Notification URL should match this path on API_BASE_URL (informational). */
+  MIDTRANS_NOTIFICATION_URL: z.string().url().optional(),
+  /** QRIS acquirer on Core API charge (e.g. gopay). Must be activated for the merchant. */
+  MIDTRANS_QRIS_ACQUIRER: z.string().min(2).max(32).default("gopay"),
   XENDIT_SECRET_KEY: z.string().optional(),
   XENDIT_WEBHOOK_TOKEN: z.string().optional(),
   XENDIT_API_BASE_URL: z.string().url().default("https://api.xendit.co"),
   PAYMENT_REFRESH_RATE_LIMIT_PER_MINUTE: z.coerce.number().default(10),
+  WEBHOOK_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().positive().default(120),
   RECONCILIATION_BATCH_SIZE: z.coerce.number().default(50),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),
   ENABLE_DEV_ROUTES: z.preprocess(
+    (val) => val === "true" || val === true,
+    z.boolean().default(false),
+  ),
+  /** Dev/staging only: mock QRIS when Midtrans returns "channel not activated". */
+  ENABLE_QRIS_STAGING_FALLBACK: z.preprocess(
     (val) => val === "true" || val === true,
     z.boolean().default(false),
   ),
@@ -49,8 +69,9 @@ export function resetEnvCacheForTests(): void {
 }
 
 export function validatePaymentProviderConfig(env: Env): void {
-  if (env.PAYMENT_PROVIDER === "midtrans" && !env.MIDTRANS_SERVER_KEY) {
-    if (env.NODE_ENV === "production") {
+  if (env.PAYMENT_PROVIDER === "midtrans") {
+    validateMidtransEnvironmentConfig(env);
+    if (!env.MIDTRANS_SERVER_KEY && env.NODE_ENV === "production") {
       throw new Error("MIDTRANS_SERVER_KEY is required when PAYMENT_PROVIDER=midtrans in production");
     }
   }

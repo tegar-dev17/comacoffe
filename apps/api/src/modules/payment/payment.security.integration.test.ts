@@ -296,4 +296,113 @@ describe("payment security integration", () => {
     });
     expect(updated?.status).toBe("SUCCEEDED");
   });
+
+  it("rejects webhook with amount mismatch", async () => {
+    const env = loadEnv({ MIDTRANS_SERVER_KEY: "SB-Mid-server-test-key" });
+    const webhookService = new WebhookService(db, env);
+    const suffix = crypto.randomUUID().slice(0, 8);
+    const providerReference = `ORD-MIS-${suffix}`;
+    const transactionId = `tx-mis-${suffix}`;
+
+    await db.insert(schema.payments).values({
+      tenantId: tenantA,
+      outletId: outletA,
+      orderId: orderA,
+      provider: "midtrans",
+      providerPaymentId: transactionId,
+      providerReference,
+      idempotencyKey: `idem-mis-${suffix}`,
+      paymentMethod: "qris",
+      amountMinor: 25000,
+      currency: "IDR",
+      status: "PENDING",
+    });
+
+    const body = {
+      order_id: providerReference,
+      status_code: "200",
+      gross_amount: "99999.00",
+      transaction_status: "settlement",
+      transaction_id: transactionId,
+    };
+    const signature = createHash("sha512")
+      .update(`${body.order_id}${body.status_code}${body.gross_amount}${env.MIDTRANS_SERVER_KEY}`)
+      .digest("hex");
+
+    const result = await webhookService.handleWebhook("midtrans", {}, { ...body, signature_key: signature });
+    expect(result.mismatch).toBe(true);
+
+    const payment = await db.query.payments.findFirst({
+      where: eq(schema.payments.providerReference, providerReference),
+    });
+    expect(payment?.status).toBe("PENDING");
+  });
+
+  it("does not downgrade settled payment on late pending webhook", async () => {
+    const env = loadEnv({ MIDTRANS_SERVER_KEY: "SB-Mid-server-test-key" });
+    const webhookService = new WebhookService(db, env);
+    const suffix = crypto.randomUUID().slice(0, 8);
+    const providerReference = `ORD-OOO-${suffix}`;
+    const transactionId = `tx-ooo-${suffix}`;
+
+    const [orderOoo] = await db
+      .insert(schema.orders)
+      .values({
+        tenantId: tenantA,
+        outletId: outletA,
+        orderNumber: providerReference,
+        totalMinor: 12000,
+        currency: "IDR",
+        status: "pending_payment",
+      })
+      .returning();
+
+    const [payment] = await db
+      .insert(schema.payments)
+      .values({
+        tenantId: tenantA,
+        outletId: outletA,
+        orderId: orderOoo!.id,
+        provider: "midtrans",
+        providerPaymentId: transactionId,
+        providerReference,
+        idempotencyKey: `idem-ooo-${suffix}`,
+        paymentMethod: "qris",
+        amountMinor: 12000,
+        currency: "IDR",
+        status: "PENDING",
+      })
+      .returning();
+
+    const settled = {
+      order_id: providerReference,
+      status_code: "200",
+      gross_amount: "12000.00",
+      transaction_status: "settlement",
+      transaction_id: transactionId,
+    };
+    const sigSettled = createHash("sha512")
+      .update(
+        `${settled.order_id}${settled.status_code}${settled.gross_amount}${env.MIDTRANS_SERVER_KEY}`,
+      )
+      .digest("hex");
+    await webhookService.handleWebhook("midtrans", {}, { ...settled, signature_key: sigSettled });
+
+    const pending = {
+      ...settled,
+      transaction_status: "pending",
+      status_code: "201",
+    };
+    const sigPending = createHash("sha512")
+      .update(
+        `${pending.order_id}${pending.status_code}${pending.gross_amount}${env.MIDTRANS_SERVER_KEY}`,
+      )
+      .digest("hex");
+    await webhookService.handleWebhook("midtrans", {}, { ...pending, signature_key: sigPending });
+
+    const updated = await db.query.payments.findFirst({
+      where: eq(schema.payments.id, payment!.id),
+    });
+    expect(updated?.status).toBe("SUCCEEDED");
+  });
 });

@@ -13,8 +13,10 @@ const baseEnv = {
   PAYMENT_ENV: "sandbox",
   MIDTRANS_SERVER_KEY: "SB-Mid-server-test-key",
   MIDTRANS_API_BASE_URL: "https://api.sandbox.midtrans.com",
+  MIDTRANS_QRIS_ACQUIRER: "gopay",
   XENDIT_API_BASE_URL: "https://api.xendit.co",
   PAYMENT_REFRESH_RATE_LIMIT_PER_MINUTE: 10,
+  WEBHOOK_RATE_LIMIT_PER_MINUTE: 120,
   RECONCILIATION_BATCH_SIZE: 50,
   LOG_LEVEL: "error",
 } as Env;

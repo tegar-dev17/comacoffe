@@ -1,24 +1,17 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import "./globals.css";
+import { ClientShell } from "../components/ClientShell";
 
 export const metadata: Metadata = {
-  title: "Comacoffe — Payment Admin",
-  description: "Payment management dashboard for Comacoffe POS",
+  title: "Comacoffe POS",
+  description: "Point of Sale dan payment gateway untuk kedai kopi Comacoffe",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="id">
       <body>
-        <header className="topbar">
-          <div className="brand">Comacoffe POS</div>
-          <nav>
-            <Link href="/">Dashboard</Link>
-            <Link href="/payments">Payments</Link>
-          </nav>
-        </header>
-        <main className="container">{children}</main>
+        <ClientShell>{children}</ClientShell>
       </body>
     </html>
   );

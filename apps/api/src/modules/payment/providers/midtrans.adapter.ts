@@ -3,6 +3,10 @@ import type { Env } from "../../../config/env.js";
 import type { PaymentStatus } from "../types.js";
 import type { PaymentProviderAdapter } from "./interface.js";
 import type { ProviderRuntimeConfig } from "./runtime-config.js";
+import {
+  formatMidtransGrossAmount,
+  resolveMidtransApiBaseUrl,
+} from "./midtrans-env.js";
 
 interface MidtransChargeResponse {
   status_code: string;
@@ -17,6 +21,7 @@ interface MidtransChargeResponse {
   actions?: Array<{ name: string; method: string; url: string }>;
   qr_string?: string;
   expiry_time?: string;
+  error_messages?: string[];
 }
 
 interface MidtransNotification {
@@ -28,6 +33,29 @@ interface MidtransNotification {
   signature_key?: string;
   fraud_status?: string;
   payment_type?: string;
+  currency?: string;
+}
+
+export function classifyMidtransChargeFailure(
+  data: MidtransChargeResponse & { error_messages?: string[] },
+  httpStatus: number,
+): Error {
+  const msg = data.status_message ?? data.error_messages?.join(", ") ?? `HTTP ${httpStatus}`;
+  const combined = msg.toLowerCase();
+  if (
+    combined.includes("acquirer") ||
+    combined.includes("not enabled") ||
+    combined.includes("payment channel") ||
+    (combined.includes("qris") && combined.includes("deny"))
+  ) {
+    return new ProviderCapabilityError(
+      `Midtrans QRIS is not activated for this merchant or acquirer: ${msg}`,
+    );
+  }
+  if (combined.includes("unauthorized") || combined.includes("access denied")) {
+    return new ProviderCapabilityError(`Midtrans authentication failed: ${msg}`);
+  }
+  return new Error(`Midtrans charge error: ${msg}`);
 }
 
 export class MidtransAdapter implements PaymentProviderAdapter {
@@ -51,7 +79,9 @@ export class MidtransAdapter implements PaymentProviderAdapter {
   private serverKey(): string {
     const key = this.runtime?.credentials.serverKey ?? this.env.MIDTRANS_SERVER_KEY;
     if (!key) {
-      throw new Error("Midtrans server key is not configured");
+      throw new ProviderCapabilityError(
+        "Midtrans server key is not configured — set MIDTRANS_SERVER_KEY or use Bayar Tunai",
+      );
     }
     return key;
   }
@@ -61,7 +91,9 @@ export class MidtransAdapter implements PaymentProviderAdapter {
   }
 
   private baseUrl(): string {
-    const base = this.runtime?.credentials.apiBaseUrl ?? this.env.MIDTRANS_API_BASE_URL;
+    const base =
+      this.runtime?.credentials.apiBaseUrl ??
+      resolveMidtransApiBaseUrl(this.env, this.env.MIDTRANS_API_BASE_URL);
     return base.replace(/\/$/, "");
   }
 
@@ -98,19 +130,32 @@ export class MidtransAdapter implements PaymentProviderAdapter {
     amountMinor: number;
     currency: string;
     paymentMethod: import("../types.js").PaymentMethod;
+    lineItems?: Array<{ id: string; name: string; priceMinor: number; quantity: number }>;
   }) {
     if (params.paymentMethod !== "qris") {
       throw new ProviderCapabilityError("Midtrans adapter: only qris is supported in this integration");
     }
-    const grossAmount = params.amountMinor;
-    const body = {
+
+    const grossAmount = formatMidtransGrossAmount(params.amountMinor, params.currency);
+    const acquirer = this.env.MIDTRANS_QRIS_ACQUIRER;
+
+    const body: Record<string, unknown> = {
       payment_type: "qris",
       transaction_details: {
         order_id: params.orderReference,
         gross_amount: grossAmount,
       },
-      qris: { acquirer: "gopay" },
+      qris: { acquirer },
     };
+
+    if (params.lineItems && params.lineItems.length > 0) {
+      body.item_details = params.lineItems.map((line) => ({
+        id: line.id.slice(0, 32),
+        name: line.name.slice(0, 50),
+        price: line.priceMinor,
+        quantity: line.quantity,
+      }));
+    }
 
     const res = await fetch(`${this.baseUrl()}/v2/charge`, {
       method: "POST",
@@ -122,27 +167,34 @@ export class MidtransAdapter implements PaymentProviderAdapter {
       body: JSON.stringify(body),
     });
 
-    const data = (await res.json()) as MidtransChargeResponse & { error_messages?: string[] };
+    const data = (await res.json()) as MidtransChargeResponse;
     if (!res.ok || data.status_code !== "201") {
-      const msg = data.status_message ?? data.error_messages?.join(", ") ?? "Midtrans charge failed";
-      throw new Error(`Midtrans charge error: ${msg}`);
+      throw classifyMidtransChargeFailure(data, res.status);
     }
 
     const qrAction =
       data.actions?.find((a) => a.name === "generate-qr-code") ??
       data.actions?.find((a) => a.name === "generate-qr-code-v2");
 
+    if (!qrAction?.url) {
+      throw new ProviderCapabilityError(
+        "Midtrans did not return a generate-qr-code action — verify QRIS acquirer is enabled for this merchant",
+      );
+    }
+
     const expiresAt = data.expiry_time ? new Date(data.expiry_time) : undefined;
 
     return {
       providerPaymentId: data.transaction_id,
       providerReference: data.order_id,
-      normalizedStatus: this.normalizeProviderStatus(data.transaction_status),
+      /** QRIS charge creation means awaiting customer payment — never mark paid from charge response alone. */
+      normalizedStatus: "PENDING" as PaymentStatus,
       instructions: {
         type: "qris" as const,
-        qrCodeUrl: qrAction?.url,
+        qrCodeUrl: qrAction.url,
         qrString: data.qr_string,
         expiresAt: expiresAt?.toISOString(),
+        message: "Scan QRIS to complete payment",
       },
       rawResponse: data as unknown as Record<string, unknown>,
       expiresAt,
@@ -257,7 +309,7 @@ export class MidtransAdapter implements PaymentProviderAdapter {
       providerReference: n.order_id,
       normalizedStatus: this.normalizeProviderStatus(n.transaction_status),
       amountMinor,
-      currency: "IDR",
+      currency: n.currency ?? "IDR",
       rawPayload: n as unknown as Record<string, unknown>,
     };
   }

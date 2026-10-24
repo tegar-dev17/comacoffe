@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { v4 as uuidv4 } from "uuid";
 import type { Env } from "../../../config/env.js";
@@ -7,14 +7,40 @@ import type { AuthContext } from "../../auth/types.js";
 import { PERMISSIONS, roleHasPermission } from "../../auth/permissions.js";
 import { createProviderAdapter } from "../providers/factory.js";
 import { createCashPaymentResult } from "../providers/cash.handler.js";
+import {
+  isQrisChannelNotActivatedError,
+  qrisStagingFallbackEnabled,
+} from "../qris-staging-fallback.js";
+import { DevMidtransAdapter } from "../providers/dev-midtrans.adapter.js";
 import { ProviderCapabilityError } from "../providers/midtrans.adapter.js";
 import { resolveTransition, isPaidStatus } from "../state-machine.js";
 import type { CreatePaymentInput, PaymentMethod, PaymentProvider } from "../types.js";
 import { stableHash } from "../utils/hash.js";
 import { MerchantConfigService } from "./merchant-config.service.js";
 import { enqueueOutboxEvent } from "./outbox.service.js";
+import {
+  ACTIVE_PAYMENT_STATUSES,
+  DUPLICATE_ACTIVE_PAYMENT_MESSAGE,
+} from "../active-payment-statuses.js";
+import { commitOrderInventory } from "../../pos/inventory.service.js";
 
 type Db = NodePgDatabase<typeof schema>;
+
+function isPgUniqueViolation(err: unknown): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    "code" in err &&
+    (err as { code: string }).code === "23505"
+  );
+}
+
+function throwIfDuplicateActivePayment(err: unknown): never {
+  if (isPgUniqueViolation(err)) {
+    throw new PaymentConflictError(DUPLICATE_ACTIVE_PAYMENT_MESSAGE);
+  }
+  throw err;
+}
 
 export class PaymentService {
   constructor(
@@ -78,36 +104,85 @@ export class PaymentService {
     const paymentId = uuidv4();
     const providerReference = `${order.orderNumber}-${paymentId.slice(0, 8)}`;
 
-    const [payment] = await this.db
-      .insert(schema.payments)
-      .values({
-        id: paymentId,
-        tenantId: auth.tenantId,
-        outletId: order.outletId,
-        orderId: order.id,
-        provider,
-        idempotencyKey: input.idempotencyKey,
-        paymentMethod: input.paymentMethod as PaymentMethod,
-        amountMinor: order.totalMinor,
-        currency: order.currency,
-        status: "CREATED",
-        providerReference,
-        metadataJson: {
-          localOperationId: input.localOperationId,
-          deviceId: input.deviceId,
-        },
-      })
-      .returning();
+    let payment: typeof schema.payments.$inferSelect;
+    try {
+      payment = await this.db.transaction(async (tx) => {
+        await tx.execute(
+          sql`SELECT id FROM orders WHERE id = ${order.id} FOR UPDATE`,
+        );
 
-    if (!payment) throw new Error("Failed to create payment");
+        const lockedOrder = await tx.query.orders.findFirst({
+          where: eq(schema.orders.id, order.id),
+        });
+        if (
+          !lockedOrder ||
+          (lockedOrder.status !== "pending_payment" && lockedOrder.status !== "draft")
+        ) {
+          throw new PaymentValidationError("Order is not eligible for payment");
+        }
 
-    await this.recordEvent(payment.id, null, "CREATED", "api.create", undefined, {});
+        const activeExisting = await tx
+          .select({ id: schema.payments.id })
+          .from(schema.payments)
+          .where(
+            and(
+              eq(schema.payments.orderId, order.id),
+              inArray(schema.payments.status, [...ACTIVE_PAYMENT_STATUSES]),
+            ),
+          )
+          .limit(1);
+
+        if (activeExisting.length > 0) {
+          throw new PaymentConflictError(DUPLICATE_ACTIVE_PAYMENT_MESSAGE);
+        }
+
+        const inserted = await tx
+          .insert(schema.payments)
+          .values({
+            id: paymentId,
+            tenantId: auth.tenantId,
+            outletId: order.outletId,
+            orderId: order.id,
+            provider,
+            idempotencyKey: input.idempotencyKey,
+            paymentMethod: input.paymentMethod as PaymentMethod,
+            amountMinor: order.totalMinor,
+            currency: order.currency,
+            status: "CREATED",
+            providerReference,
+            metadataJson: {
+              localOperationId: input.localOperationId,
+              deviceId: input.deviceId,
+            },
+          })
+          .returning();
+
+        const row = inserted[0];
+        if (!row) throw new Error("Failed to create payment");
+
+        await tx.insert(schema.paymentEvents).values({
+          paymentId: row.id,
+          toStatus: "CREATED",
+          source: "api.create",
+          payloadJson: {},
+        });
+
+        return row;
+      });
+    } catch (err) {
+      if (err instanceof PaymentConflictError) throw err;
+      throwIfDuplicateActivePayment(err);
+    }
 
     let providerResult;
     let attemptError: string | undefined;
     try {
       if (provider === "cash") {
-        providerResult = createCashPaymentResult({ paymentId, amountMinor: order.totalMinor });
+        providerResult = createCashPaymentResult({
+          paymentId,
+          amountMinor: order.totalMinor,
+          cashAmountReceivedMinor: input.cashAmountReceivedMinor,
+        });
       } else {
         const merchantConfigs = new MerchantConfigService(this.db, this.env);
         const runtime = await merchantConfigs.resolveRuntimeConfig({
@@ -117,14 +192,36 @@ export class PaymentService {
         });
         const adapter = createProviderAdapter(this.env, provider, runtime);
         if (!adapter) throw new Error("Provider adapter missing");
-        providerResult = await adapter.createPayment({
+        const orderLines = await this.db.query.orderItems.findMany({
+          where: eq(schema.orderItems.orderId, order.id),
+        });
+        const chargeParams = {
           paymentId,
           orderId: order.id,
           orderReference: providerReference,
           amountMinor: order.totalMinor,
           currency: order.currency,
           paymentMethod: input.paymentMethod,
-        });
+          lineItems: orderLines.map((line) => ({
+            id: line.productId ?? line.id,
+            name: line.productName,
+            priceMinor: line.unitPriceMinor,
+            quantity: line.quantity,
+          })),
+        };
+        try {
+          providerResult = await adapter.createPayment(chargeParams);
+        } catch (providerErr) {
+          if (
+            qrisStagingFallbackEnabled(this.env) &&
+            input.paymentMethod === "qris" &&
+            isQrisChannelNotActivatedError(providerErr)
+          ) {
+            providerResult = await new DevMidtransAdapter().createPayment(chargeParams);
+          } else {
+            throw providerErr;
+          }
+        }
       }
     } catch (err) {
       attemptError = err instanceof Error ? err.message : "Provider error";
@@ -168,7 +265,7 @@ export class PaymentService {
     });
 
     if (nextStatus === "SUCCEEDED") {
-      await this.markOrderPaid(order.id);
+      await this.markOrderPaid(order.id, auth.userId);
     }
 
     const response = this.toPublicPayment(updated!, providerResult.instructions);
@@ -332,53 +429,70 @@ export class PaymentService {
     providerEventId?: string,
     payload?: Record<string, unknown>,
   ) {
-    const next = resolveTransition(payment.status, toStatus);
-    if (next === payment.status) return payment;
+    return this.db.transaction(async (tx) => {
+      await tx.execute(
+        sql`SELECT id FROM payments WHERE id = ${payment.id} FOR UPDATE`,
+      );
 
-    await this.db.transaction(async (tx) => {
+      const current = await tx.query.payments.findFirst({
+        where: eq(schema.payments.id, payment.id),
+      });
+      if (!current) throw new PaymentNotFoundError("Payment not found");
+
+      const next = resolveTransition(current.status, toStatus);
+      if (next === current.status) {
+        return current;
+      }
+
+      const now = new Date();
       await tx
         .update(schema.payments)
         .set({
           status: next,
-          succeededAt: next === "SUCCEEDED" ? new Date() : payment.succeededAt,
-          failedAt: next === "FAILED" ? new Date() : payment.failedAt,
-          updatedAt: new Date(),
+          succeededAt: next === "SUCCEEDED" ? now : current.succeededAt,
+          failedAt: next === "FAILED" ? now : current.failedAt,
+          updatedAt: now,
         })
-        .where(eq(schema.payments.id, payment.id));
+        .where(eq(schema.payments.id, current.id));
 
       await tx.insert(schema.paymentEvents).values({
-        paymentId: payment.id,
-        fromStatus: payment.status,
+        paymentId: current.id,
+        fromStatus: current.status,
         toStatus: next,
         source,
         providerEventId,
         payloadJson: payload,
       });
 
-      if (next === "SUCCEEDED") {
+      if (next === "SUCCEEDED" && !isPaidStatus(current.status)) {
         await tx
           .update(schema.orders)
-          .set({ status: "paid", paidAt: new Date(), updatedAt: new Date() })
-          .where(eq(schema.orders.id, payment.orderId));
+          .set({ status: "paid", paidAt: now, updatedAt: now })
+          .where(eq(schema.orders.id, current.orderId));
+        await commitOrderInventory(tx, {
+          tenantId: current.tenantId,
+          outletId: current.outletId,
+          orderId: current.orderId,
+        });
       }
 
       await enqueueOutboxEvent(tx, {
-        tenantId: payment.tenantId,
+        tenantId: current.tenantId,
         aggregateType: "payment",
-        aggregateId: payment.id,
+        aggregateId: current.id,
         eventType: "payment.status_changed",
-        dedupeKey: `payment:${payment.id}:status:${next}:${providerEventId ?? source}`,
+        dedupeKey: `payment:${current.id}:status:${next}:${providerEventId ?? source}`,
         payload: {
-          paymentId: payment.id,
-          orderId: payment.orderId,
-          fromStatus: payment.status,
+          paymentId: current.id,
+          orderId: current.orderId,
+          fromStatus: current.status,
           toStatus: next,
           source,
         },
       });
-    });
 
-    return { ...payment, status: next };
+      return { ...current, status: next, succeededAt: next === "SUCCEEDED" ? now : current.succeededAt, updatedAt: now };
+    });
   }
 
   async getPaymentDetail(auth: AuthContext, paymentId: string) {
@@ -398,8 +512,11 @@ export class PaymentService {
       where: eq(schema.paymentAttempts.paymentId, paymentId),
     });
 
+    const instructions = (payment.metadataJson as { instructions?: import("../types.js").PaymentInstructions })
+      ?.instructions;
+
     return {
-      payment: this.toPublicPayment(payment),
+      payment: this.toPublicPayment(payment, instructions),
       statusHistory: events.map((e) => ({
         id: e.id,
         fromStatus: e.fromStatus,
@@ -432,11 +549,26 @@ export class PaymentService {
     };
   }
 
-  async markOrderPaid(orderId: string) {
-    await this.db
-      .update(schema.orders)
-      .set({ status: "paid", paidAt: new Date(), updatedAt: new Date() })
-      .where(eq(schema.orders.id, orderId));
+  async markOrderPaid(orderId: string, actorUserId?: string) {
+    await this.db.transaction(async (tx) => {
+      const order = await tx.query.orders.findFirst({
+        where: eq(schema.orders.id, orderId),
+      });
+      if (!order) return;
+      const now = new Date();
+      if (order.status !== "paid") {
+        await tx
+          .update(schema.orders)
+          .set({ status: "paid", paidAt: now, updatedAt: now })
+          .where(eq(schema.orders.id, orderId));
+      }
+      await commitOrderInventory(tx, {
+        tenantId: order.tenantId,
+        outletId: order.outletId,
+        orderId,
+        actorUserId,
+      });
+    });
   }
 
   async getPaymentForTenant(auth: AuthContext, paymentId: string) {

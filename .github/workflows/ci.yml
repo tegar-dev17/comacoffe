@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: comacoffe
+          POSTGRES_PASSWORD: comacoffe
+          POSTGRES_DB: comacoffe
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U comacoffe -d comacoffe"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://comacoffe:comacoffe@localhost:5432/comacoffe
+      JWT_SECRET: ci-test-jwt-secret-key-minimum-32-chars
+      NODE_ENV: test
+      PAYMENT_ENV: sandbox
+      ENABLE_DEV_ROUTES: "false"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Apply migrations
+        run: npm run db:migrate -w @comacoffe/api
+
+      - name: Integration tests
+        run: npm run test:integration -w @comacoffe/api
+
+      - name: Build
+        run: npm run build
+
+      - name: Install Playwright browsers
+        run: npx playwright install chromium --with-deps
+
+      - name: E2E (POS cash)
+        run: npm run test:e2e
+        env:
+          CI: "true"
+          E2E_API_PORT: "3011"
+          E2E_WEB_PORT: "3010"

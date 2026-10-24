@@ -18,6 +18,12 @@ export interface PaymentProviderAdapter {
     currency: string;
     paymentMethod: CreatePaymentInput["paymentMethod"];
     metadata?: Record<string, unknown>;
+    lineItems?: Array<{
+      id: string;
+      name: string;
+      priceMinor: number;
+      quantity: number;
+    }>;
   }): Promise<ProviderCreatePaymentResult>;
   getPaymentStatus(params: {
     providerPaymentId?: string;

@@ -14,7 +14,8 @@
     "lint": "npm run lint -w @comacoffe/api && npm run lint -w @comacoffe/web",
     "typecheck": "npm run typecheck -w @comacoffe/api && npm run typecheck -w @comacoffe/web",
     "db:generate": "npm run db:generate -w @comacoffe/api",
-    "db:migrate": "npm run db:migrate -w @comacoffe/api"
+    "db:migrate": "npm run db:migrate -w @comacoffe/api",
+    "test:e2e": "playwright test -c apps/web/playwright.config.ts"
   },
   "engines": {
     "node": ">=20"

@@ -1,4 +1,5 @@
 import type { Env } from "./env.js";
+import { resolveMidtransApiBaseUrl, resolveMidtransEnvironment } from "../modules/payment/providers/midtrans-env.js";
 
 /** Routes/tools that must never be exposed in production. */
 export function isNonProductionAppEnv(env: Env): boolean {
@@ -31,7 +32,10 @@ export function validateProductionSecurity(env: Env): void {
     throw new Error("PAYMENT_ENV must be production when NODE_ENV=production");
   }
 
-  if (env.MIDTRANS_API_BASE_URL.includes("sandbox") && env.PAYMENT_PROVIDER === "midtrans") {
-    throw new Error("MIDTRANS_API_BASE_URL must not point to sandbox in production");
+  if (env.PAYMENT_PROVIDER === "midtrans" && resolveMidtransEnvironment(env) === "production") {
+    const base = resolveMidtransApiBaseUrl(env, env.MIDTRANS_API_BASE_URL);
+    if (base.includes("sandbox")) {
+      throw new Error("Midtrans API base URL must not point to sandbox in production");
+    }
   }
 }

@@ -1,10 +1,28 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { formatIdr } from "@/lib/api";
+import { API_BASE, apiFetch } from "@/lib/api-client";
+import { getToken } from "@/lib/auth";
+import { formatDateTimeId, formatIdr } from "@/lib/format";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
+type PaymentInstructions = {
+  type?: string;
+  qrCodeUrl?: string;
+  qrString?: string;
+  expiresAt?: string;
+  message?: string;
+  stagingFallback?: boolean;
+};
+
+function qrDisplayUrl(instructions: PaymentInstructions | null | undefined): string | null {
+  if (!instructions) return null;
+  if (instructions.qrCodeUrl) return instructions.qrCodeUrl;
+  if (instructions.qrString) {
+    return `https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=${encodeURIComponent(instructions.qrString)}`;
+  }
+  return null;
+}
 
 type Detail = {
   payment: {
@@ -17,155 +35,185 @@ type Detail = {
     providerReference: string | null;
     createdAt: string;
     updatedAt: string;
+    instructions?: PaymentInstructions | null;
   };
-  statusHistory: Array<{ id: string; fromStatus: string | null; toStatus: string; source: string; createdAt: string }>;
-  refunds: Array<{ id: string; amountMinor: number; status: string; approvalStatus: string; reason: string; createdAt: string }>;
-  reconciliations: Array<{ id: string; status: string; notes: string | null; providerStatus: string | null; createdAt: string }>;
-  inquiries: Array<{ id: string; attemptNumber: number; httpStatus: number | null; errorMessage: string | null; createdAt: string }>;
+  statusHistory: Array<{
+    id: string;
+    fromStatus: string | null;
+    toStatus: string;
+    source: string;
+    createdAt: string;
+  }>;
 };
 
 export default function PaymentDetailPage() {
   const params = useParams<{ paymentId: string }>();
-  const [token, setToken] = useState("");
+  const token = getToken();
   const [detail, setDetail] = useState<Detail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [simulating, setSimulating] = useState(false);
 
-  useEffect(() => {
-    const saved = window.localStorage.getItem("comacoffe_admin_token");
-    if (saved) setToken(saved);
-  }, []);
-
-  async function load() {
+  const load = useCallback(async () => {
     if (!token) {
-      setError("JWT token wajib");
+      setError("Login diperlukan");
       return;
     }
-    window.localStorage.setItem("comacoffe_admin_token", token);
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${API_BASE}/api/v1/payments/${params.paymentId}/detail`, {
-        headers: { Authorization: `Bearer ${token}` },
-        cache: "no-store",
-      });
-      if (!res.ok) throw new Error(`Gagal memuat detail (${res.status})`);
-      const json = (await res.json()) as { data: Detail };
+      const json = await apiFetch<{ data: Detail }>(
+        `/api/v1/payments/${params.paymentId}/detail`,
+        { token },
+      );
       setDetail(json.data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error");
     } finally {
       setLoading(false);
     }
+  }, [token, params.paymentId]);
+
+  const refreshStatus = useCallback(async () => {
+    if (!token) return;
+    setRefreshing(true);
+    try {
+      await apiFetch(`/api/v1/payments/${params.paymentId}/refresh`, {
+        method: "POST",
+        token,
+      });
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Refresh failed");
+    } finally {
+      setRefreshing(false);
+    }
+  }, [token, params.paymentId, load]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  useEffect(() => {
+    if (!detail || detail.payment.status !== "PENDING") return;
+    const timer = window.setInterval(() => {
+      void refreshStatus();
+    }, 8000);
+    return () => window.clearInterval(timer);
+  }, [detail, refreshStatus]);
+
+  const instructions = detail?.payment.instructions;
+  const isPending = detail?.payment.status === "PENDING";
+  const qrImageUrl = qrDisplayUrl(instructions);
+  const showStagingSimulate = Boolean(isPending && instructions?.stagingFallback);
+
+  async function simulateStagingPayment() {
+    setSimulating(true);
+    setError(null);
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/v1/dev/payments/${params.paymentId}/simulate-success`,
+        { method: "POST" },
+      );
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(typeof body.error === "string" ? body.error : "Simulasi gagal");
+      }
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Simulasi gagal");
+    } finally {
+      setSimulating(false);
+    }
   }
 
   return (
     <div>
-      <h1>Payment Detail</h1>
+      <h1>Pembayaran QRIS</h1>
       <p className="muted">
-        ID: <code>{params.paymentId}</code>
+        Referensi: <code>{detail?.payment.providerReference ?? params.paymentId}</code>
       </p>
       <div className="filters card">
-        <input
-          placeholder="Bearer token"
-          value={token}
-          onChange={(e) => setToken(e.target.value)}
-          style={{ flex: 1, minWidth: 260 }}
-        />
-        <button onClick={() => void load()} disabled={loading}>
-          {loading ? "Memuat..." : "Muat detail"}
+        <button type="button" onClick={() => void load()} disabled={loading}>
+          {loading ? "Memuat…" : "Muat ulang"}
+        </button>
+        <button
+          type="button"
+          className="secondary"
+          onClick={() => void refreshStatus()}
+          disabled={refreshing || !token}
+        >
+          {refreshing ? "Cek status…" : "Cek status Midtrans"}
         </button>
       </div>
       {error ? <p className="error">{error}</p> : null}
       {!detail ? (
-        <p className="muted">Belum ada data detail.</p>
+        <p className="muted">Memuat detail pembayaran…</p>
       ) : (
         <>
           <div className="card">
             <p>
-              <strong>Status:</strong> {detail.payment.status}
+              <strong>Status:</strong>{" "}
+              <span className={isPending ? "status-pending" : ""}>{detail.payment.status}</span>
             </p>
             <p>
               <strong>Order:</strong> {detail.payment.orderId}
             </p>
             <p>
-              <strong>Provider:</strong> {detail.payment.provider} / {detail.payment.providerReference ?? "—"}
-            </p>
-            <p>
               <strong>Nominal:</strong> {formatIdr(detail.payment.amountMinor)}
             </p>
             <p className="muted">
-              Dibuat {new Date(detail.payment.createdAt).toLocaleString("id-ID")} · Diperbarui{" "}
-              {new Date(detail.payment.updatedAt).toLocaleString("id-ID")}
+              Provider {detail.payment.provider} · Diperbarui {formatDateTimeId(detail.payment.updatedAt)}
             </p>
           </div>
+
+          {isPending && qrImageUrl ? (
+            <div className="card qris-panel">
+              <h2>{instructions?.stagingFallback ? "QRIS staging" : "Scan QRIS"}</h2>
+              <p className="muted">{instructions?.message ?? "Scan dengan aplikasi pembayaran Anda."}</p>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={qrImageUrl} alt="QRIS payment code" className="qris-image" />
+              {instructions?.expiresAt ? (
+                <p className="muted">Kedaluwarsa: {formatDateTimeId(instructions.expiresAt)}</p>
+              ) : null}
+              {showStagingSimulate ? (
+                <button type="button" onClick={() => void simulateStagingPayment()} disabled={simulating}>
+                  {simulating ? "Menyelesaikan…" : "Simulasikan pembayaran berhasil (demo)"}
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+
+          {detail.payment.status === "SUCCEEDED" ? (
+            <p className="success">Pembayaran terverifikasi. Pesanan telah ditandai lunas.</p>
+          ) : null}
+          {detail.payment.status === "EXPIRED" || detail.payment.status === "FAILED" ? (
+            <p className="error">Pembayaran {detail.payment.status.toLowerCase()}.</p>
+          ) : null}
+
           <div className="card">
             <h2>Riwayat status</h2>
-            {detail.statusHistory.length === 0 ? (
-              <p className="muted">Kosong</p>
-            ) : (
-              <table>
-                <thead>
-                  <tr>
-                    <th>Dari</th>
-                    <th>Ke</th>
-                    <th>Sumber</th>
-                    <th>Waktu</th>
+            <table>
+              <thead>
+                <tr>
+                  <th>Dari</th>
+                  <th>Ke</th>
+                  <th>Sumber</th>
+                  <th>Waktu</th>
+                </tr>
+              </thead>
+              <tbody>
+                {detail.statusHistory.map((e) => (
+                  <tr key={e.id}>
+                    <td>{e.fromStatus ?? "—"}</td>
+                    <td>{e.toStatus}</td>
+                    <td>{e.source}</td>
+                    <td>{formatDateTimeId(e.createdAt)}</td>
                   </tr>
-                </thead>
-                <tbody>
-                  {detail.statusHistory.map((e) => (
-                    <tr key={e.id}>
-                      <td>{e.fromStatus ?? "—"}</td>
-                      <td>{e.toStatus}</td>
-                      <td>{e.source}</td>
-                      <td>{new Date(e.createdAt).toLocaleString("id-ID")}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-          <div className="card">
-            <h2>Refund</h2>
-            {detail.refunds.length === 0 ? (
-              <p className="muted">Belum ada refund</p>
-            ) : (
-              <table>
-                <thead>
-                  <tr>
-                    <th>Nominal</th>
-                    <th>Status</th>
-                    <th>Approval</th>
-                    <th>Alasan</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {detail.refunds.map((r) => (
-                    <tr key={r.id}>
-                      <td>{formatIdr(r.amountMinor)}</td>
-                      <td>{r.status}</td>
-                      <td>{r.approvalStatus}</td>
-                      <td>{r.reason}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-          <div className="card">
-            <h2>Rekonsiliasi</h2>
-            {detail.reconciliations.length === 0 ? (
-              <p className="muted">Tidak ada exception</p>
-            ) : (
-              <ul>
-                {detail.reconciliations.map((r) => (
-                  <li key={r.id}>
-                    {r.status} — {r.notes ?? r.providerStatus} ({new Date(r.createdAt).toLocaleString("id-ID")})
-                  </li>
                 ))}
-              </ul>
-            )}
+              </tbody>
+            </table>
           </div>
         </>
       )}

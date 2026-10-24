@@ -34,6 +34,12 @@ describe("dev routes production guard", () => {
     });
     expect(bootstrap.statusCode).toBe(404);
 
+    const simulate = await app.inject({
+      method: "POST",
+      url: "/api/v1/dev/payments/00000000-0000-0000-0000-000000000001/simulate-success",
+    });
+    expect(simulate.statusCode).toBe(404);
+
     await app.close();
     await pool.end();
   });
