@@ -5,6 +5,7 @@ import rateLimit from "@fastify/rate-limit";
 import sensible from "@fastify/sensible";
 import { loadEnv, validatePaymentProviderConfig } from "./config/env.js";
 import { validateProductionSecurity } from "./config/runtime.js";
+import { resolveCorsOrigin } from "./config/cors.js";
 import { createDb, createDbPool } from "./db/client.js";
 import dbPlugin from "./plugins/db.plugin.js";
 import authPlugin from "./plugins/auth.plugin.js";
@@ -18,6 +19,7 @@ import { registerAuthRoutes } from "./routes/auth.routes.js";
 import { registerPosRoutes } from "./routes/pos.routes.js";
 import { registerCatalogRoutes } from "./routes/catalog.routes.js";
 import { registerReportRoutes } from "./routes/reports.routes.js";
+import { registerPublicRoutes } from "./routes/public.routes.js";
 import { startOutboxWorker } from "./jobs/outbox.worker.js";
 import { startReconciliationScheduler } from "./jobs/reconciliation.worker.js";
 
@@ -37,13 +39,14 @@ async function main() {
       (req.headers["x-request-id"] as string | undefined) ?? crypto.randomUUID(),
   });
 
-  await app.register(cors, { origin: true });
+  await app.register(cors, { origin: resolveCorsOrigin(env) });
   await app.register(sensible);
   await app.register(rateLimit, { global: false });
   await app.register(dbPlugin, { db });
   await app.register(authPlugin, { jwtSecret: env.JWT_SECRET });
 
   await registerHealthRoutes(app, env);
+  await registerPublicRoutes(app, env);
   await registerPaymentRoutes(app, env);
   await registerWebhookRoutes(app, env);
   await registerOrderRoutes(app);

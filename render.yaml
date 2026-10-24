@@ -1,0 +1,71 @@
+# Render Blueprint — Comacoffe POS (private repo via authorized GitHub connection)
+# Apply: Dashboard → Blueprints → New Blueprint Instance → select repo + branch
+#
+# Free tier notes:
+# - Web services spin down after ~15 min idle (cold start on next visit).
+# - Free PostgreSQL expires after 90 days (export/upgrade before expiry).
+
+databases:
+  - name: comacoffe-db
+    plan: free
+    region: singapore
+    databaseName: comacoffe
+    user: comacoffe
+
+services:
+  - type: web
+    name: comacoffe-api
+    runtime: node
+    plan: free
+    region: singapore
+    rootDir: .
+    buildCommand: npm ci && npm run build -w @comacoffe/api
+    startCommand: npm run start:render -w @comacoffe/api
+    healthCheckPath: /ready
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PAYMENT_PROVIDER
+        value: midtrans
+      - key: PAYMENT_ENV
+        value: production
+      - key: MIDTRANS_ENVIRONMENT
+        value: production
+      - key: MIDTRANS_QRIS_ACQUIRER
+        value: gopay
+      - key: ENABLE_DEV_ROUTES
+        value: "false"
+      - key: LOG_LEVEL
+        value: info
+      - key: DATABASE_URL
+        fromDatabase:
+          name: comacoffe-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: API_BASE_URL
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      - key: MIDTRANS_SERVER_KEY
+        sync: false
+      - key: MIDTRANS_CLIENT_KEY
+        sync: false
+      - key: MIDTRANS_MERCHANT_ID
+        sync: false
+
+  - type: web
+    name: comacoffe-web
+    runtime: node
+    plan: free
+    region: singapore
+    rootDir: .
+    buildCommand: npm ci && npm run build -w @comacoffe/web
+    startCommand: npm run start -w @comacoffe/web
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NEXT_PUBLIC_API_BASE_URL
+        sync: false

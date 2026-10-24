@@ -4,7 +4,14 @@ import { validateMidtransEnvironmentConfig } from "../modules/payment/providers/
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().default(3001),
-  API_BASE_URL: z.string().url().default("http://localhost:3001"),
+  API_BASE_URL: z.preprocess(
+    (val) => val ?? process.env.RENDER_EXTERNAL_URL ?? undefined,
+    z.string().url().default("http://localhost:3001"),
+  ),
+  /** Comma-separated browser origins allowed to call the API (production). */
+  CORS_ORIGINS: z.string().optional(),
+  /** Primary frontend origin (used for CORS when CORS_ORIGINS is unset). */
+  FRONTEND_URL: z.string().url().optional(),
   DATABASE_URL: z.string().min(1),
   JWT_SECRET: z.string().min(32),
   PAYMENT_PROVIDER: z.enum(["midtrans", "xendit"]).default("midtrans"),

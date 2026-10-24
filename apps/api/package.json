@@ -13,7 +13,9 @@
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:e2e:midtrans": "vitest run --config vitest.e2e.config.ts",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "tsx src/db/migrate.ts"
+    "db:migrate": "tsx src/db/migrate.ts",
+    "db:seed-demo": "tsx src/scripts/seed-demo.ts",
+    "start:render": "node dist/db/migrate.js && node dist/index.js"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.2",
