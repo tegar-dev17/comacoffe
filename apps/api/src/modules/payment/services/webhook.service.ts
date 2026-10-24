@@ -97,6 +97,20 @@ export class WebhookService {
         return { ok: true, ignored: true };
       }
 
+      const ownership = verifyPaymentOwnership(payment, parsed);
+      if (!ownership.ok) {
+        await this.db
+          .update(schema.paymentWebhookEvents)
+          .set({
+            paymentId: payment.id,
+            processingStatus: "FAILED",
+            processingError: ownership.reason,
+            processedAt: new Date(),
+          })
+          .where(eq(schema.paymentWebhookEvents.id, webhookRow.id));
+        return { ok: true, ignored: true, reason: ownership.reason };
+      }
+
       if (
         parsed.amountMinor !== undefined &&
         parsed.currency &&
@@ -154,6 +168,27 @@ export class WebhookService {
       throw err;
     }
   }
+}
+
+function verifyPaymentOwnership(
+  payment: typeof schema.payments.$inferSelect,
+  parsed: import("../types.js").ParsedWebhookEvent,
+): { ok: true } | { ok: false; reason: string } {
+  if (
+    parsed.providerReference &&
+    payment.providerReference &&
+    parsed.providerReference !== payment.providerReference
+  ) {
+    return { ok: false, reason: "provider_reference_mismatch" };
+  }
+  if (
+    parsed.providerPaymentId &&
+    payment.providerPaymentId &&
+    parsed.providerPaymentId !== payment.providerPaymentId
+  ) {
+    return { ok: false, reason: "provider_payment_id_mismatch" };
+  }
+  return { ok: true };
 }
 
 function sanitizeHeaders(headers: Record<string, string | string[] | undefined>) {

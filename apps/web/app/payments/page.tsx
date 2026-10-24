@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { fetchPayments, formatIdr } from "@/lib/api";
+import { fetchPayments } from "@/lib/api";
+import { formatDateTimeId, formatIdr } from "@/lib/format";
 
 export default function PaymentsPage() {
   const [token, setToken] = useState("");
@@ -9,6 +10,7 @@ export default function PaymentsPage() {
   const [provider, setProvider] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(false);
   const [rows, setRows] = useState<
     Array<{
       id: string;
@@ -23,6 +25,7 @@ export default function PaymentsPage() {
   >([]);
 
   useEffect(() => {
+    setMounted(true);
     const saved = window.localStorage.getItem("comacoffe_admin_token");
     if (saved) setToken(saved);
   }, []);
@@ -110,7 +113,7 @@ export default function PaymentsPage() {
           <div className="stat-label">Unknown</div>
         </div>
         <div className="card">
-          <div className="stat-value">{formatIdr(stats.volume)}</div>
+          <div className="stat-value">{mounted ? formatIdr(stats.volume) : "—"}</div>
           <div className="stat-label">Volume nominal</div>
         </div>
       </div>
@@ -146,7 +149,7 @@ export default function PaymentsPage() {
                   <td>{row.provider}</td>
                   <td>{row.paymentMethod}</td>
                   <td>{formatIdr(row.amountMinor)}</td>
-                  <td>{new Date(row.createdAt).toLocaleString("id-ID")}</td>
+                  <td>{formatDateTimeId(row.createdAt)}</td>
                 </tr>
               ))}
             </tbody>

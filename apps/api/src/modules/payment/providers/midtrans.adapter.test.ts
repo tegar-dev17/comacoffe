@@ -15,6 +15,7 @@ const baseEnv = {
   MIDTRANS_API_BASE_URL: "https://api.sandbox.midtrans.com",
   XENDIT_API_BASE_URL: "https://api.xendit.co",
   PAYMENT_REFRESH_RATE_LIMIT_PER_MINUTE: 10,
+  WEBHOOK_RATE_LIMIT_PER_MINUTE: 120,
   RECONCILIATION_BATCH_SIZE: 50,
   LOG_LEVEL: "error",
 } as Env;

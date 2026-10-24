@@ -35,10 +35,4 @@ export async function fetchPayments(params: {
   }>;
 }
 
-export function formatIdr(amountMinor: number) {
-  return new Intl.NumberFormat("id-ID", {
-    style: "currency",
-    currency: "IDR",
-    minimumFractionDigits: 0,
-  }).format(amountMinor);
-}
+export { formatIdr, formatDateTimeId } from "./format";
