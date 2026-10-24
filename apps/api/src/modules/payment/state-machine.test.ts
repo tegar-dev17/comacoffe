@@ -23,4 +23,21 @@ describe("payment state machine", () => {
   it("handles out-of-order weaker failed after succeeded", () => {
     expect(resolveTransition("SUCCEEDED", "FAILED")).toBe("SUCCEEDED");
   });
+
+  it("rejects succeeded to created downgrade", () => {
+    expect(resolveTransition("SUCCEEDED", "CREATED")).toBe("SUCCEEDED");
+    expect(canTransition("SUCCEEDED", "CREATED")).toBe(false);
+  });
+
+  it("lists failed to pending on allow-list but rank guard blocks downgrade by default", () => {
+    expect(canTransition("FAILED", "PENDING")).toBe(true);
+    expect(resolveTransition("FAILED", "PENDING")).toBe("FAILED");
+    expect(resolveTransition("FAILED", "PENDING", { force: true })).toBe("PENDING");
+  });
+
+  it("does not leave refunded or cancelled states", () => {
+    expect(canTransition("REFUNDED", "SUCCEEDED")).toBe(false);
+    expect(canTransition("CANCELLED", "PENDING")).toBe(false);
+    expect(resolveTransition("REFUNDED", "PENDING")).toBe("REFUNDED");
+  });
 });

@@ -16,6 +16,7 @@ const envSchema = z.object({
   XENDIT_WEBHOOK_TOKEN: z.string().optional(),
   XENDIT_API_BASE_URL: z.string().url().default("https://api.xendit.co"),
   PAYMENT_REFRESH_RATE_LIMIT_PER_MINUTE: z.coerce.number().default(10),
+  WEBHOOK_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().positive().default(120),
   RECONCILIATION_BATCH_SIZE: z.coerce.number().default(50),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),
   ENABLE_DEV_ROUTES: z.preprocess(
