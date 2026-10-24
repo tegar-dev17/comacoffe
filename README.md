@@ -29,12 +29,14 @@ curl -X POST http://localhost:3001/api/v1/dev/bootstrap
 curl -X POST http://localhost:3001/api/v1/dev/token -H 'Content-Type: application/json' -d '{"userId":"<admin-user-id>"}'
 ```
 
-Frontend admin:
+Frontend (POS + admin):
 
 ```bash
 npm run dev:web
-# http://localhost:3000/payments
+# http://localhost:3000/login
 ```
+
+Login demo (after bootstrap): `cashier@demo.coffee` / `demo1234` — halaman **Kasir** di `/pos`.
 
 ## Payment API (v1)
 

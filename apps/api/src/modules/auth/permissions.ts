@@ -8,6 +8,12 @@ export const PERMISSIONS = {
   PAYMENT_EXPORT: "payment.export",
   PAYMENT_PROVIDER_CONFIGURE: "payment.provider.configure",
   PAYMENT_AUDIT_READ: "payment.audit.read",
+  ORDER_READ: "order.read",
+  POS_CHECKOUT: "pos.checkout",
+  PRODUCT_READ: "product.read",
+  PRODUCT_MANAGE: "product.manage",
+  INVENTORY_MANAGE: "inventory.manage",
+  REPORT_READ: "report.read",
 } as const;
 
 export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
@@ -24,11 +30,20 @@ const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     PERMISSIONS.PAYMENT_RECONCILE,
     PERMISSIONS.PAYMENT_EXPORT,
     PERMISSIONS.PAYMENT_AUDIT_READ,
+    PERMISSIONS.ORDER_READ,
+    PERMISSIONS.POS_CHECKOUT,
+    PERMISSIONS.PRODUCT_READ,
+    PERMISSIONS.PRODUCT_MANAGE,
+    PERMISSIONS.INVENTORY_MANAGE,
+    PERMISSIONS.REPORT_READ,
   ],
   cashier: [
     PERMISSIONS.PAYMENT_READ,
     PERMISSIONS.PAYMENT_CREATE,
     PERMISSIONS.PAYMENT_REFRESH,
+    PERMISSIONS.ORDER_READ,
+    PERMISSIONS.POS_CHECKOUT,
+    PERMISSIONS.PRODUCT_READ,
   ],
 };
 

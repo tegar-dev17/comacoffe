@@ -26,7 +26,9 @@ export default function PaymentsPage() {
 
   useEffect(() => {
     setMounted(true);
-    const saved = window.localStorage.getItem("comacoffe_admin_token");
+    const saved =
+      window.localStorage.getItem("comacoffe_auth_token") ??
+      window.localStorage.getItem("comacoffe_admin_token");
     if (saved) setToken(saved);
   }, []);
 

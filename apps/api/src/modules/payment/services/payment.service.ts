@@ -17,6 +17,7 @@ import {
   ACTIVE_PAYMENT_STATUSES,
   DUPLICATE_ACTIVE_PAYMENT_MESSAGE,
 } from "../active-payment-statuses.js";
+import { commitOrderInventory } from "../../pos/inventory.service.js";
 
 type Db = NodePgDatabase<typeof schema>;
 
@@ -233,7 +234,7 @@ export class PaymentService {
     });
 
     if (nextStatus === "SUCCEEDED") {
-      await this.markOrderPaid(order.id);
+      await this.markOrderPaid(order.id, auth.userId);
     }
 
     const response = this.toPublicPayment(updated!, providerResult.instructions);
@@ -437,6 +438,11 @@ export class PaymentService {
           .update(schema.orders)
           .set({ status: "paid", paidAt: now, updatedAt: now })
           .where(eq(schema.orders.id, current.orderId));
+        await commitOrderInventory(tx, {
+          tenantId: current.tenantId,
+          outletId: current.outletId,
+          orderId: current.orderId,
+        });
       }
 
       await enqueueOutboxEvent(tx, {
@@ -509,11 +515,26 @@ export class PaymentService {
     };
   }
 
-  async markOrderPaid(orderId: string) {
-    await this.db
-      .update(schema.orders)
-      .set({ status: "paid", paidAt: new Date(), updatedAt: new Date() })
-      .where(eq(schema.orders.id, orderId));
+  async markOrderPaid(orderId: string, actorUserId?: string) {
+    await this.db.transaction(async (tx) => {
+      const order = await tx.query.orders.findFirst({
+        where: eq(schema.orders.id, orderId),
+      });
+      if (!order) return;
+      const now = new Date();
+      if (order.status !== "paid") {
+        await tx
+          .update(schema.orders)
+          .set({ status: "paid", paidAt: now, updatedAt: now })
+          .where(eq(schema.orders.id, orderId));
+      }
+      await commitOrderInventory(tx, {
+        tenantId: order.tenantId,
+        outletId: order.outletId,
+        orderId,
+        actorUserId,
+      });
+    });
   }
 
   async getPaymentForTenant(auth: AuthContext, paymentId: string) {

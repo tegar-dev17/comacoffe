@@ -14,6 +14,10 @@ import { registerWebhookRoutes } from "./routes/webhooks.routes.js";
 import { registerOrderRoutes } from "./routes/orders.routes.js";
 import { registerReconciliationRoutes } from "./routes/reconciliation.routes.js";
 import { registerDevRoutes } from "./routes/dev.routes.js";
+import { registerAuthRoutes } from "./routes/auth.routes.js";
+import { registerPosRoutes } from "./routes/pos.routes.js";
+import { registerCatalogRoutes } from "./routes/catalog.routes.js";
+import { registerReportRoutes } from "./routes/reports.routes.js";
 import { startOutboxWorker } from "./jobs/outbox.worker.js";
 import { startReconciliationScheduler } from "./jobs/reconciliation.worker.js";
 
@@ -43,6 +47,10 @@ async function main() {
   await registerPaymentRoutes(app, env);
   await registerWebhookRoutes(app, env);
   await registerOrderRoutes(app);
+  await registerAuthRoutes(app);
+  await registerPosRoutes(app, env);
+  await registerCatalogRoutes(app);
+  await registerReportRoutes(app);
   await registerReconciliationRoutes(app, env);
   await registerDevRoutes(app, env);
 

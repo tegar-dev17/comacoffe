@@ -112,3 +112,121 @@ button {
 .error {
   color: #9b1c1c;
 }
+
+.success {
+  color: #166534;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.stack label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+}
+
+.link-btn {
+  background: transparent;
+  border: none;
+  color: #f5e6dc;
+  margin-left: 1rem;
+  cursor: pointer;
+  font: inherit;
+}
+
+.login-wrap {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  background: var(--bg);
+}
+
+.login-card {
+  width: min(420px, 92vw);
+}
+
+.pos-layout {
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  gap: 1rem;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .pos-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.product-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 0.75rem;
+}
+
+.product-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.25rem;
+  padding: 0.75rem;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  cursor: pointer;
+  text-align: left;
+}
+
+.cart-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 1rem;
+}
+
+.cart-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.qty-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.qty-controls button {
+  padding: 0.2rem 0.45rem;
+}
+
+button.secondary {
+  background: #4a5568;
+}
+
+.cart-total {
+  font-size: 1.1rem;
+}
+
+.button-link {
+  display: inline-block;
+  margin-top: 1rem;
+  padding: 0.55rem 0.9rem;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 8px;
+  text-decoration: none;
+}
+
+@media print {
+  .topbar,
+  button {
+    display: none !important;
+  }
+}

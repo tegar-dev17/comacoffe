@@ -1,7 +1,8 @@
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq, gte, lte } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import * as schema from "../db/schema/index.js";
+import { PERMISSIONS, roleHasPermission } from "../modules/auth/permissions.js";
 
 const createOrderSchema = z.object({
   outletId: z.string().uuid(),
@@ -13,6 +14,59 @@ const createOrderSchema = z.object({
 });
 
 export async function registerOrderRoutes(app: FastifyInstance) {
+  app.get(
+    "/api/v1/orders",
+    { preHandler: [app.authenticate] },
+    async (request, reply) => {
+      if (!roleHasPermission(request.auth!.role, PERMISSIONS.ORDER_READ)) {
+        return reply.status(403).send({ error: "Insufficient permission" });
+      }
+      const qs = request.query as {
+        outletId?: string;
+        status?: string;
+        from?: string;
+        to?: string;
+        page?: string;
+        limit?: string;
+      };
+      const page = Math.max(1, Number(qs.page ?? 1));
+      const limit = Math.min(100, Math.max(1, Number(qs.limit ?? 20)));
+      const offset = (page - 1) * limit;
+
+      const conditions = [eq(schema.orders.tenantId, request.auth!.tenantId)];
+      if (qs.outletId) conditions.push(eq(schema.orders.outletId, qs.outletId));
+      if (request.auth!.outletId && request.auth!.role === "cashier") {
+        conditions.push(eq(schema.orders.outletId, request.auth!.outletId));
+      }
+      if (qs.status) {
+        conditions.push(eq(schema.orders.status, qs.status as "paid"));
+      }
+      if (qs.from) conditions.push(gte(schema.orders.createdAt, new Date(qs.from)));
+      if (qs.to) conditions.push(lte(schema.orders.createdAt, new Date(qs.to)));
+
+      const rows = await app.db.query.orders.findMany({
+        where: and(...conditions),
+        orderBy: desc(schema.orders.createdAt),
+        limit,
+        offset,
+      });
+
+      return {
+        data: rows.map((o) => ({
+          id: o.id,
+          orderNumber: o.orderNumber,
+          status: o.status,
+          totalMinor: o.totalMinor,
+          currency: o.currency,
+          outletId: o.outletId,
+          paidAt: o.paidAt?.toISOString() ?? null,
+          createdAt: o.createdAt.toISOString(),
+        })),
+        pagination: { page, limit },
+      };
+    },
+  );
+
   app.post(
     "/api/v1/orders",
     { preHandler: [app.authenticate] },
@@ -75,6 +129,19 @@ export async function registerOrderRoutes(app: FastifyInstance) {
         ),
       });
       if (!order) return reply.status(404).send({ error: "Order not found" });
+      if (
+        request.auth!.outletId &&
+        request.auth!.role === "cashier" &&
+        order.outletId !== request.auth!.outletId
+      ) {
+        return reply.status(403).send({ error: "Outlet access denied" });
+      }
+      const items = await app.db.query.orderItems.findMany({
+        where: eq(schema.orderItems.orderId, order.id),
+      });
+      const payments = await app.db.query.payments.findMany({
+        where: eq(schema.payments.orderId, order.id),
+      });
       return {
         data: {
           id: order.id,
@@ -83,6 +150,20 @@ export async function registerOrderRoutes(app: FastifyInstance) {
           totalMinor: order.totalMinor,
           currency: order.currency,
           paidAt: order.paidAt?.toISOString() ?? null,
+          createdAt: order.createdAt.toISOString(),
+          items: items.map((i) => ({
+            id: i.id,
+            productName: i.productName,
+            unitPriceMinor: i.unitPriceMinor,
+            quantity: i.quantity,
+            lineTotalMinor: i.lineTotalMinor,
+          })),
+          payments: payments.map((p) => ({
+            id: p.id,
+            status: p.status,
+            paymentMethod: p.paymentMethod,
+            amountMinor: p.amountMinor,
+          })),
         },
       };
     },
